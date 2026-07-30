@@ -1,5 +1,7 @@
 """Вспомогательные утилиты."""
 
+from .worker import WorkerThread, LoadingOverlay, run_async
+
 def style_application():
     """Применение стилей к приложению."""
     import tkinter as tk

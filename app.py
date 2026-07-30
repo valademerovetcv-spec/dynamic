@@ -12,9 +12,11 @@ from matplotlib.figure import Figure
 from matplotlib import rcParams
 import matplotlib.dates as mdates
 from pathlib import Path
+import threading
 
 from calc import DataLoader
 from core.calculator import Calculator
+from utils.worker import run_async, LoadingOverlay
 
 BG = "#f0f2f5"
 FG = "#1a1a2e"
@@ -1303,44 +1305,65 @@ class DinamikaApp:
 
         self._calculating = True
         self.status_var.set("Выполнение расчёта...")
-        self.root.update_idletasks()
+        
+        # Используем асинхронное выполнение для тяжелых вычислений
+        def do_calculate():
+            try:
+                if has_per_layer:
+                    self.loader.calculate_per_layer_magnet()
+                    self.loader.calculate_per_layer()
+                else:
+                    self.loader.calculate()
+                return True
+            except Exception as e:
+                raise e
+        
+        def on_complete(result):
+            try:
+                self._populate_tree(self.tree_result, self.loader.result_df)
+                self._update_channel_toggles()
+                self._draw_result_chart()
+                self._draw_disp_chart(draw_magnet=False)
+                self._draw_magnet_chart()
+                self._update_calib_selection_panel()
 
-        try:
-            if has_per_layer:
-                self.loader.calculate_per_layer_magnet()
-                self.loader.calculate_per_layer()
-            else:
-                self.loader.calculate()
-            self._populate_tree(self.tree_result, self.loader.result_df)
-            self._update_channel_toggles()
-            self._draw_result_chart()
-            self._draw_disp_chart(draw_magnet=False)
-            self._draw_magnet_chart()
-            self._update_calib_selection_panel()
+                if self.loader.auto_zero_point is not None:
+                    if self.loader.manual_zero_point is None:
+                        self._manual_zero_var.set(f"{self.loader.auto_zero_point:.3f}")
+                    self._update_zero_entry_state()
 
-            if self.loader.auto_zero_point is not None:
-                if self.loader.manual_zero_point is None:
-                    self._manual_zero_var.set(f"{self.loader.auto_zero_point:.3f}")
-                self._update_zero_entry_state()
+                if self._peak_range is not None:
+                    self._calculate_and_draw_peaks(*self._peak_range)
 
-            if self._peak_range is not None:
-                self._calculate_and_draw_peaks(*self._peak_range)
+                n = len(self.loader.result_df)
+                mn = self.loader.result_df.iloc[:, 1].min()
+                mx = self.loader.result_df.iloc[:, 1].max()
 
-            n = len(self.loader.result_df)
-            mn = self.loader.result_df.iloc[:, 1].min()
-            mx = self.loader.result_df.iloc[:, 1].max()
-
-            src_n = len(self.loader.source_data) if self.loader.source_data is not None else 0
-            cal_n = len(self.loader.calib_data) if self.loader.calib_data is not None else 0
-            mag = self.loader.magnet_info
-            n_ch = len(self.loader.result_channels) if self.loader.result_channels else 1
-            self.stats_var.set(f"Каналов: {n_ch}  |  Результат: {n} точек  |  {mn} — {mx} мм  |  {mag}")
-            self.status_var.set("Расчёт завершён")
-        except Exception as e:
-            messagebox.showerror("Ошибка расчёта", str(e))
+                src_n = len(self.loader.source_data) if self.loader.source_data is not None else 0
+                cal_n = len(self.loader.calib_data) if self.loader.calib_data is not None else 0
+                mag = self.loader.magnet_info
+                n_ch = len(self.loader.result_channels) if self.loader.result_channels else 1
+                self.stats_var.set(f"Каналов: {n_ch}  |  Результат: {n} точек  |  {mn} — {mx} мм  |  {mag}")
+                self.status_var.set("Расчёт завершён")
+            except Exception as e:
+                messagebox.showerror("Ошибка расчёта", str(e))
+                self.status_var.set("Ошибка расчёта")
+            finally:
+                self._calculating = False
+        
+        def on_error(error):
+            messagebox.showerror("Ошибка расчёта", str(error))
             self.status_var.set("Ошибка расчёта")
-        finally:
             self._calculating = False
+        
+        # Запускаем вычисления в фоновом потоке с индикатором загрузки
+        run_async(
+            func=do_calculate,
+            parent=self.root,
+            loading_text="Выполняется расчёт...",
+            on_complete=on_complete,
+            on_error=on_error
+        )
 
     def _draw_result_chart(self):
         self.result_ax.clear()
