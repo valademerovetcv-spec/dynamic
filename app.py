@@ -1461,10 +1461,15 @@ class DinamikaApp:
                 info = self.loader._per_layer_calib_info[ch_name]
                 # Первое плато равно базовой линии (усредненному нулю)
                 plateau1_val = baseline
-                # Пик - максимальное отклонение от базовой линии (используется в расчете прогиба)
-                peak_val = info.get('peak', 0.0)
                 # Второе плато - среднее значение после пика
                 plateau2_val = info.get('plateau2', 0.0)
+            
+            # Пик - наибольшее абсолютное отклонение от базовой линии на всём сигнале
+            if ch_name in self.loader.result_channels:
+                channel_data = self.loader.result_channels[ch_name]
+                # Находим максимальное абсолютное отклонение от baseline
+                deviations = np.abs(channel_data - baseline)
+                peak_val = float(np.max(deviations))
             
             self.peak_stats_tree.insert("", tk.END, values=(
                 ch_name,
