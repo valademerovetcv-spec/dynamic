@@ -182,174 +182,27 @@ class DinamikaApp:
         self.tab_temp = ttk.Frame(self.global_notebook)
         self.global_notebook.add(self.tab_temp, text="  Температуры  ")
 
-        self._build_deform_tab(self.tab_deform)
+        # Используем вынесенный класс DeformationsTab
+        from ui.tabs import DeformationsTab
+        self.deformations_tab = DeformationsTab(self.tab_deform, self)
+        
         self._build_temp_tab(self.tab_temp)
 
+    # Метод _build_deform_tab теперь находится в ui/tabs/deformations.py
+    # Оставлен как заглушка для обратной совместимости, если нужно
     def _build_deform_tab(self, parent):
-        main_paned = ttk.PanedWindow(parent, orient=tk.VERTICAL)
-        main_paned.pack(fill=tk.BOTH, expand=True)
+        """Заглушка - теперь используется DeformationsTab из ui.tabs."""
+        pass
 
-        top_paned = ttk.PanedWindow(main_paned, orient=tk.HORIZONTAL)
-        main_paned.add(top_paned, weight=1)
+    def _make_tree(self, parent):
+        """Создает Treeview с прокруткой."""
+        from ui.components import create_treeview
+        return create_treeview(parent)
 
-        left_frame = ttk.LabelFrame(top_paned, text=" Динамика — Исходные данные (Drop CSV/XLSX)")
-        top_paned.add(left_frame, weight=3)
-        src_btn_frame = ttk.Frame(left_frame)
-        src_btn_frame.pack(fill=tk.X, padx=4, pady=(4, 0))
-        ttk.Button(src_btn_frame, text="Сброс", style="ToolbarCsv.TButton",
-                   command=self._reset_dynamics).pack(side=tk.RIGHT, padx=2)
-        self.source_notebook = ttk.Notebook(left_frame)
-        self.source_notebook.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-        self._source_tabs = {}
-        self.source_notebook.bind("<<NotebookTabChanged>>", self._on_source_tab_changed)
-
-        right_frame = ttk.LabelFrame(top_paned, text=" Тарировка — Калибровочная кривая (Drop CSV/XLSX)")
-        top_paned.add(right_frame, weight=2)
-        cal_btn_frame = ttk.Frame(right_frame)
-        cal_btn_frame.pack(fill=tk.X, padx=4, pady=(4, 0))
-        ttk.Button(cal_btn_frame, text="Сброс", style="ToolbarCsv.TButton",
-                   command=self._reset_calibration).pack(side=tk.RIGHT, padx=2)
-        self.calib_notebook = ttk.Notebook(right_frame)
-        self.calib_notebook.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-        self._calib_tabs = {}
-
-        # Drag-and-drop — hook root window, determine zone by mouse position
-        windnd.hook_dropfiles(self.root, func=self._on_drop_root)
-
-        raw_chart_frame = ttk.LabelFrame(top_paned, text=" Данные динамики ")
-        top_paned.add(raw_chart_frame, weight=3)
-
-        # Pack toolbar and toggle frames first (at bottom)
-        self.channel_toggle_frame = ttk.Frame(raw_chart_frame)
-        self.channel_toggle_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=(0, 2))
-
-        raw_tb = ttk.Frame(raw_chart_frame)
-        raw_tb.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=(0, 4))
-        self.raw_toolbar_frame = raw_tb
-
-        # Create notebook and tabs
-        self.raw_notebook = ttk.Notebook(raw_chart_frame)
-
-        self.tab_time = ttk.Frame(self.raw_notebook)
-        self.raw_notebook.add(self.tab_time, text="  Динамика  ")
-
-        self.tab_disp = ttk.Frame(self.raw_notebook)
-        self.raw_notebook.add(self.tab_disp, text="  Тарировка  ")
-
-        self.tab_magnet = ttk.Frame(self.raw_notebook)
-        self.raw_notebook.add(self.tab_magnet, text="  Положение магнита  ")
-
-        self.raw_fig = Figure(figsize=(5, 3), dpi=100)
-        self.raw_ax = self.raw_fig.add_subplot(111)
-        self.raw_canvas = FigureCanvasTkAgg(self.raw_fig, master=self.tab_time)
-        self.raw_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-        self.disp_fig = Figure(figsize=(5, 3), dpi=100)
-        self.disp_ax = self.disp_fig.add_subplot(111)
-        self.disp_canvas = FigureCanvasTkAgg(self.disp_fig, master=self.tab_disp)
-        self.disp_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-        self.magnet_fig = Figure(figsize=(5, 3), dpi=100)
-        self.magnet_ax = self.magnet_fig.add_subplot(111)
-        self.magnet_canvas = FigureCanvasTkAgg(self.magnet_fig, master=self.tab_magnet)
-        self.magnet_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-        # Pack notebook last (fills remaining space above toolbar/toggles)
-        self.raw_notebook.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-
-        self.raw_toolbar = NavigationToolbar2Tk(self.raw_canvas, raw_tb)
-        self.raw_toolbar.update()
-        self.disp_toolbar = NavigationToolbar2Tk(self.disp_canvas, raw_tb)
-        self.disp_toolbar.pack_forget()
-        self.magnet_toolbar = NavigationToolbar2Tk(self.magnet_canvas, raw_tb)
-        self.magnet_toolbar.pack_forget()
-
-        self.raw_notebook.bind("<<NotebookTabChanged>>", self._on_raw_tab_changed)
-
-        calib_sel_frame = ttk.LabelFrame(top_paned, text=" Выбор тарировки ")
-        top_paned.add(calib_sel_frame, weight=2)
-
-        calib_sel_btn_frame = ttk.Frame(calib_sel_frame)
-        calib_sel_btn_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=(0, 4))
-        ttk.Button(calib_sel_btn_frame, text="Применить", style="ToolbarCsv.TButton",
-                   command=self._apply_calib_selection).pack(side=tk.LEFT, padx=2)
-        ttk.Button(calib_sel_btn_frame, text="Выбрать диапазон", style="ToolbarCsv.TButton",
-                   command=self._start_calib_range_selection).pack(side=tk.LEFT, padx=2)
-        ttk.Button(calib_sel_btn_frame, text="Сбросить вручную", style="ToolbarCsv.TButton",
-                   command=self._reset_calib_manual).pack(side=tk.LEFT, padx=2)
-        self.calib_sel_info_label = ttk.Label(calib_sel_btn_frame, text="", style="Info.TLabel")
-        self.calib_sel_info_label.pack(side=tk.LEFT, padx=8)
-
-        calib_sel_container = ttk.Frame(calib_sel_frame)
-        calib_sel_container.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-        self.calib_sel_canvas = tk.Canvas(calib_sel_container, bg=PANEL_BG, highlightthickness=0)
-        calib_sel_vsb = ttk.Scrollbar(calib_sel_container, orient=tk.VERTICAL,
-                                       command=self.calib_sel_canvas.yview)
-        self.calib_sel_inner = ttk.Frame(self.calib_sel_canvas)
-        self.calib_sel_inner.bind(
-            "<Configure>",
-            lambda e: self.calib_sel_canvas.configure(scrollregion=self.calib_sel_canvas.bbox("all"))
-        )
-        self.calib_sel_canvas.create_window((0, 0), window=self.calib_sel_inner, anchor="nw")
-        self.calib_sel_canvas.configure(yscrollcommand=calib_sel_vsb.set)
-        self.calib_sel_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        calib_sel_vsb.pack(side=tk.RIGHT, fill=tk.Y)
-
-        bot_paned = ttk.PanedWindow(main_paned, orient=tk.HORIZONTAL)
-        main_paned.add(bot_paned, weight=3)
-
-        res = ttk.LabelFrame(bot_paned, text=" Результат расчёта ")
-        bot_paned.add(res, weight=2)
-        self.tree_result = self._make_tree(res)
-
-        chart = ttk.LabelFrame(bot_paned, text=" График: Перемещение от времени ")
-        bot_paned.add(chart, weight=3)
-
-        self.result_fig = Figure(figsize=(7, 4), dpi=100)
-        self.result_ax = self.result_fig.add_subplot(111)
-
-        # Pack toggle frame and toolbar first (at bottom)
-        self.result_toggle_frame = ttk.Frame(chart)
-        self.result_toggle_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=(0, 2))
-
-        tb_frame = ttk.Frame(chart)
-        tb_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=(0, 4))
-
-        # Create and pack canvas last (fills remaining space)
-        self.result_canvas = FigureCanvasTkAgg(self.result_fig, master=chart)
-        self.result_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-
-        self.result_canvas.mpl_connect('motion_notify_event', self._on_result_motion)
-        self.result_canvas.mpl_connect('axes_leave_event', self._on_result_leave)
-
-        self.result_toolbar = NavigationToolbar2Tk(self.result_canvas, tb_frame)
-        self.result_toolbar.update()
-
-        # === Peak values panel ===
-        peak_frame = ttk.LabelFrame(bot_paned, text=" Пиковые значения ")
-        bot_paned.add(peak_frame, weight=2)
-
-        peak_btn_frame = ttk.Frame(peak_frame)
-        peak_btn_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=(0, 4))
-
-        self.peak_select_btn = ttk.Button(peak_btn_frame, text="Выбрать диапазон",
-                                           style="ToolbarCsv.TButton",
-                                           command=self._start_peak_selection)
-        self.peak_select_btn.pack(side=tk.LEFT, padx=2)
-
-        self.peak_info_label = ttk.Label(peak_btn_frame, text="", style="Info.TLabel")
-        self.peak_info_label.pack(side=tk.LEFT, padx=8)
-
-        self.peak_fig = Figure(figsize=(5, 4), dpi=100)
-        self.peak_ax = self.peak_fig.add_subplot(111)
-        self.peak_canvas = FigureCanvasTkAgg(self.peak_fig, master=peak_frame)
-        self.peak_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-
-        self._peak_selection_active = False
-        self._peak_selection_start = None
-        self._peak_selection_rect = None
-        self._peak_press_id = None
-        self._peak_release_id = None
+    def _populate_tree(self, tree, df):
+        """Заполняет Treeview данными из DataFrame."""
+        from ui.components import populate_treeview
+        populate_treeview(tree, df)
 
     def _build_temp_tab(self, parent):
         self._temp_file_path = None
