@@ -1356,7 +1356,7 @@ class DinamikaApp:
                 if visible:
                     color = CHANNEL_COLORS[i % len(CHANNEL_COLORS)]
                     self.result_ax.plot(self.loader.dynamics_time, ch_data,
-                                        linewidth=0.8, color=color, label=ch_name)
+                                        linewidth=0.6, color=color, label=ch_name, rasterized=True)
                     visible_any = True
             if visible_any:
                 self.result_ax.legend(loc="upper right", fontsize=8)
@@ -1365,7 +1365,7 @@ class DinamikaApp:
         elif self.loader.result_df is not None and not self.loader.result_df.empty:
             self.result_ax.plot(self.loader.result_df["Время, мсек"],
                                 self.loader.result_df["Перемещение, мм"],
-                                linewidth=0.8, color="#2196F3")
+                                linewidth=0.6, color="#2196F3", rasterized=True)
             self.result_ax.set_xlabel("Время, мсек")
             self.result_ax.set_ylabel("Перемещение, мм")
         else:
@@ -1373,7 +1373,7 @@ class DinamikaApp:
                                 ha="center", va="center", transform=self.result_ax.transAxes,
                                 fontsize=12, color="#94a3b8")
 
-        self.result_ax.grid(True, alpha=0.3)
+        self.result_ax.grid(True, alpha=0.2)
 
         self.result_fig.tight_layout()
         self.result_canvas.draw()
@@ -1622,7 +1622,7 @@ class DinamikaApp:
                 if visible:
                     color = CHANNEL_COLORS[i % len(CHANNEL_COLORS)]
                     self.raw_ax.plot(self.loader.dynamics_time, ch_data,
-                                     linewidth=0.6, color=color, label=ch_name)
+                                     linewidth=0.6, color=color, label=ch_name, rasterized=True)
                     visible_any = True
             if visible_any:
                 self.raw_ax.legend(loc="upper right", fontsize=8)
@@ -1634,7 +1634,7 @@ class DinamikaApp:
             src_val = src_cols[1] if len(src_cols) > 1 else src_cols[0]
             self.raw_ax.plot(self.loader.source_data[src_time],
                              self.loader.source_data[src_val],
-                             linewidth=0.6, color="#4CAF50")
+                             linewidth=0.6, color="#4CAF50", rasterized=True)
             self.raw_ax.set_xlabel(src_time)
             self.raw_ax.set_ylabel(src_val)
         else:
@@ -1642,7 +1642,7 @@ class DinamikaApp:
                              ha="center", va="center", transform=self.raw_ax.transAxes,
                              fontsize=12, color="#94a3b8")
 
-        self.raw_ax.grid(True, alpha=0.3)
+        self.raw_ax.grid(True, alpha=0.2)
         self.raw_fig.tight_layout()
         self.raw_canvas.draw()
 
@@ -1686,9 +1686,9 @@ class DinamikaApp:
                     info = self.loader._per_layer_calib_info.get(ch_name)
                     if info:
                         self.disp_ax.axvline(info["range_left"], color="#ef4444",
-                                             linewidth=1.2, linestyle="--", alpha=0.7)
+                                             linewidth=1.0, linestyle="--", alpha=0.6)
                         self.disp_ax.axvline(info["range_right"], color="#ef4444",
-                                             linewidth=1.2, linestyle="--", alpha=0.7)
+                                             linewidth=1.0, linestyle="--", alpha=0.6)
                     visible_any = True
             if visible_any:
                 self.disp_ax.legend(loc="upper right", fontsize=7)
@@ -1708,13 +1708,13 @@ class DinamikaApp:
             info = self.loader._global_calib_info
             if info:
                 self.disp_ax.axvline(info["range_left"], color="#ef4444",
-                                     linewidth=1.2, linestyle="--", alpha=0.7)
+                                     linewidth=1.0, linestyle="--", alpha=0.6)
                 self.disp_ax.axvline(info["range_right"], color="#ef4444",
-                                     linewidth=1.2, linestyle="--", alpha=0.7)
+                                     linewidth=1.0, linestyle="--", alpha=0.6)
             elif self.loader._overlap_range:
                 rl, rr = self.loader._overlap_range
-                self.disp_ax.axvline(rl, color="#ef4444", linewidth=1.2, linestyle="--", alpha=0.7)
-                self.disp_ax.axvline(rr, color="#ef4444", linewidth=1.2, linestyle="--", alpha=0.7)
+                self.disp_ax.axvline(rl, color="#ef4444", linewidth=1.0, linestyle="--", alpha=0.6)
+                self.disp_ax.axvline(rr, color="#ef4444", linewidth=1.0, linestyle="--", alpha=0.6)
             if visible_any:
                 self.disp_ax.legend(loc="upper right", fontsize=8)
             self.disp_ax.set_xlabel("мм")
@@ -1725,7 +1725,7 @@ class DinamikaApp:
             cal_val = cal_cols[1] if len(cal_cols) > 1 else cal_cols[0]
             self.disp_ax.plot(self.loader.calib_data[cal_disp],
                               self.loader.calib_data[cal_val],
-                              linewidth=0.8, color="#4CAF50")
+                              linewidth=0.6, color="#4CAF50", rasterized=True)
             self.disp_ax.set_xlabel(cal_disp)
             self.disp_ax.set_ylabel(cal_val)
         else:
@@ -1734,9 +1734,9 @@ class DinamikaApp:
                               fontsize=12, color="#94a3b8")
 
         for rl, rr in self._calib_range_highlights.values():
-            self.disp_ax.axvspan(rl, rr, alpha=0.15, color='#fbbf24', zorder=0)
+            self.disp_ax.axvspan(rl, rr, alpha=0.1, color='#fbbf24', zorder=0)
 
-        self.disp_ax.grid(True, alpha=0.3)
+        self.disp_ax.grid(True, alpha=0.2)
         self.disp_fig.tight_layout()
         self.disp_canvas.draw()
 
@@ -1776,12 +1776,12 @@ class DinamikaApp:
                 for tug_name, tug_vals in cal["tug"].items():
                     color = CHANNEL_COLORS[color_idx % len(CHANNEL_COLORS)]
                     is_sel = (tug_name == selected)
-                    lw = 2.2 if is_sel else 0.8
-                    alpha = 1.0 if is_sel else 0.55
+                    lw = 2.2 if is_sel else 0.6
+                    alpha = 1.0 if is_sel else 0.4
                     suffix = " *" if is_sel else ""
                     label = f"{ch_name} — {tug_name}{suffix}"
                     self.magnet_ax.plot(cal["disp"], tug_vals,
-                                        linewidth=lw, color=color, alpha=alpha, label=label)
+                                        linewidth=lw, color=color, alpha=alpha, label=label, rasterized=(not is_sel))
 
                     ix_info = layer_ix.get(tug_name, {})
                     mid_y = ix_info.get('mid_y')
@@ -1790,21 +1790,21 @@ class DinamikaApp:
                         mid_y = tug_vals[mid_idx]
                     x_pts = ix_info.get('x_points', np.array([]))
 
-                    self.magnet_ax.axhline(y=mid_y, color=color, linewidth=1,
-                                           linestyle='--', alpha=0.65)
+                    self.magnet_ax.axhline(y=mid_y, color=color, linewidth=0.8,
+                                           linestyle='--', alpha=0.5)
                     if len(x_pts) > 0:
                         self.magnet_ax.plot(x_pts, np.full_like(x_pts, mid_y), 'o',
-                                            color=color, markersize=6,
-                                            markeredgecolor='black', markeredgewidth=0.8, zorder=5)
+                                            color=color, markersize=5,
+                                            markeredgecolor='black', markeredgewidth=0.6, zorder=5)
                     color_idx += 1
 
                 if magnet_x is not None:
                     y_vals = [np.interp(magnet_x, cal["disp"], tv) for tv in cal["tug"].values()]
                     y_mark = float(np.mean(y_vals)) if y_vals else 0
-                    self.magnet_ax.axvline(x=magnet_x, color='red', linewidth=2.5,
-                                           linestyle='-', alpha=0.9, zorder=6)
+                    self.magnet_ax.axvline(x=magnet_x, color='red', linewidth=2.0,
+                                           linestyle='-', alpha=0.8, zorder=6)
                     self.magnet_ax.plot(magnet_x, y_mark, 'v', color='red',
-                                        markersize=10, zorder=7)
+                                        markersize=9, zorder=7)
                     sel_txt = f", {selected}" if selected else ""
                     self.magnet_ax.annotate(
                         f"{ch_name}: X={magnet_x:.1f} мм{sel_txt}",
@@ -1837,30 +1837,30 @@ class DinamikaApp:
                 color = CHANNEL_COLORS[i % len(CHANNEL_COLORS)]
                 is_selected = (ch_name == selected)
 
-                lw = 2.5 if is_selected else 0.8
-                alpha = 1.0 if is_selected else 0.5
+                lw = 2.5 if is_selected else 0.6
+                alpha = 1.0 if is_selected else 0.4
                 label = f"{ch_name} *" if is_selected else ch_name
-                self.magnet_ax.plot(disp, ch_data, linewidth=lw, color=color, alpha=alpha, label=label)
+                self.magnet_ax.plot(disp, ch_data, linewidth=lw, color=color, alpha=alpha, label=label, rasterized=(not is_selected))
 
                 if ch_name in self.loader._magnet_intersections:
                     info = self.loader._magnet_intersections[ch_name]
                     mid_y = info['mid_y']
                     x_pts = info['x_points']
 
-                    self.magnet_ax.axhline(y=mid_y, color=color, linewidth=1, linestyle='--', alpha=0.7)
+                    self.magnet_ax.axhline(y=mid_y, color=color, linewidth=0.8, linestyle='--', alpha=0.5)
 
                     self.magnet_ax.plot(x_pts, np.full_like(x_pts, mid_y), 'o',
-                                        color=color, markersize=7, markeredgecolor='black',
-                                        markeredgewidth=1.0, zorder=5)
+                                        color=color, markersize=6, markeredgecolor='black',
+                                        markeredgewidth=0.8, zorder=5)
 
             mag_x = self.loader._magnet_x
             if mag_x is not None:
-                self.magnet_ax.axvline(x=mag_x, color='red', linewidth=2.5, linestyle='-',
+                self.magnet_ax.axvline(x=mag_x, color='red', linewidth=2.0, linestyle='-',
                                        label=f"Магнит X={mag_x:.1f}")
 
                 y_lo, y_hi = self.magnet_ax.get_ylim()
                 y_mark = y_lo + (y_hi - y_lo) * 0.03
-                self.magnet_ax.plot(mag_x, y_mark, 'v', color='red', markersize=10, zorder=6)
+                self.magnet_ax.plot(mag_x, y_mark, 'v', color='red', markersize=9, zorder=6)
 
             self.magnet_ax.legend(loc="upper right", fontsize=7)
             self.magnet_ax.set_xlabel("мм")
@@ -1870,7 +1870,7 @@ class DinamikaApp:
                                 ha="center", va="center", transform=self.magnet_ax.transAxes,
                                 fontsize=12, color="#94a3b8")
 
-        self.magnet_ax.grid(True, alpha=0.3)
+        self.magnet_ax.grid(True, alpha=0.2)
         self.magnet_fig.tight_layout()
         self.magnet_canvas.draw()
 
