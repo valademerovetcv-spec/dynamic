@@ -1504,8 +1504,9 @@ class DinamikaApp:
             if len(ch_in_range) == 0:
                 continue
             baseline = baselines[ch_name]
+            # Для центрированных данных deviation считается от нуля (т.к. данные уже центрированы)
             max_in_range = float(np.max(ch_in_range))
-            deviation = max_in_range - zero_point
+            deviation = max_in_range  # Данные уже центрированы относительно своего baseline
             if deviation < DEVIATION_THRESHOLD:
                 continue
             names.append(ch_name)
