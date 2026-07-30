@@ -496,7 +496,9 @@ class Calculator:
         self.loader.magnet_info = ""
         self.loader.result_channels = {}
         self.loader._per_layer_calib_info = {}
-
+        
+        # Шаг 1: Рассчитываем перемещения для каждого слоя с индивидуальным нулём
+        raw_results = {}
         for dn, tugriki_vals in self.loader.dynamics_channels.items():
             if dn not in self.loader.per_layer_calib:
                 continue
@@ -544,11 +546,38 @@ class Calculator:
                 "magnet_x": self.loader._per_layer_magnet_x.get(dn),
             }
 
+            # Расчёт перемещения с использованием интерполяции
             result_disp = Interpolator.calc_single_channel(tugriki_vals, cal_tug, cal_disp)
-            self.loader.result_channels[dn] = np.round(result_disp, 3)
+            raw_results[dn] = np.round(result_disp, 3)
+        
+        # Шаг 2: Для каждого слоя находим свой baseline (усредненный ноль)
+        layer_baselines = {}
+        for dn, disp_vals in raw_results.items():
+            layer_baselines[dn] = SignalAnalyzer.find_baseline(disp_vals)
+        
+        # Шаг 3: Центрируем каждый слой относительно своего нуля
+        centered_results = {}
+        for dn, disp_vals in raw_results.items():
+            centered_results[dn] = disp_vals - layer_baselines[dn]
+        
+        # Шаг 4: Находим общий ноль для отображения (минимум из всех baseline'ов)
+        if layer_baselines:
+            common_zero = min(layer_baselines.values())
+        else:
+            common_zero = 0.0
+        
+        # Шаг 5: Сохраняем результаты и обновляем информацию о нулях
+        self.loader.result_channels = centered_results
+        self.loader.channel_baselines = layer_baselines
+        self.loader.channel_mins = layer_baselines.copy()
+        self.loader.auto_zero_point = common_zero
+        self.loader.zero_point = (
+            self.loader.manual_zero_point
+            if self.loader.manual_zero_point is not None
+            else self.loader.auto_zero_point
+        )
 
         if self.loader.result_channels:
-            self._update_zero_and_baselines()
             key = list(self.loader.result_channels.keys())[0]
             self.loader.result_df = pd.DataFrame({
                 "Время, мсек": time_vals,

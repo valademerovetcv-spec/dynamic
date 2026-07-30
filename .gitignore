@@ -1,80 +1,44 @@
-```gitignore
-# Python
-__pycache__/
+# Compiled and build artifacts
 *.pyc
-*.pyo
-*.pyd
-.Python
-env/
-venv/
-.venv/
-.ENV
-.venv.bak/
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Generated/compiled files
-*.class
+__pycache__/
 *.o
 *.obj
 *.out
-*.exe
-*.dll
-*.so
-*.a
 
-# Distribution / packaging
-dist/
-build/
-*.egg-info/
-.eggs/
+# Dependencies
+.venv/
+venv/
+node_modules/
 
-# Testing
-.coverage
-htmlcov/
-.tox/
-.nox/
-coverage.xml
-*.cover
-
-# Logs
+# Logs and temp files
 *.log
+*.tmp
+*.swp
 
-# Environment variables
+# Environment
 .env
 .env.local
-.env.*
-!.env.example
+*.env.*
 
-# IDE
+# Editors
 .vscode/
 .idea/
-*.swp
-*.swo
-*~
 
-# OS
-.DS_Store
-Thumbs.db
+# Coverage reports
+.coverage
+coverage/
+htmlcov/
 
-# MyPy
+# Python cache
 .mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pytest
 .pytest_cache/
 
-# Coverage
-.coverage*
+# Distribution files
+dist/
+build/
+target/
+.gradle/
 
-# Temporary files
-*.tmp
-*.temp
-```
-
-Wait, I need to reconsider. The file changes only include source code files (`app.py`, `core/calculator.py`) with no build artifacts, dependencies, or temporary files. Following rule #6, I should output nothing.
-
-```gitignore
-
-```
+# System files
+.DS_Store
+Thumbs.db
