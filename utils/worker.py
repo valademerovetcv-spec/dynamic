@@ -118,6 +118,9 @@ def run_async(func: Callable, args: tuple = (), kwargs: dict = None,
         on_complete: Callback по завершении (вызывается в главном потоке)
         on_error: Callback при ошибке (вызывается в главном потоке)
     """
+    if kwargs is None:
+        kwargs = {}
+    
     overlay = LoadingOverlay(parent, loading_text) if parent else None
     
     def wrapped_complete(result):
