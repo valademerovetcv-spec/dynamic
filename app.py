@@ -1346,9 +1346,10 @@ class DinamikaApp:
         self.result_ax.clear()
         self.result_ax.set_title("Перемещение от времени")
 
-        if self.loader.result_channels:
+        # Используем result_channels_raw для графика "Перемещение от времени" (без центрирования)
+        if hasattr(self.loader, 'result_channels_raw') and self.loader.result_channels_raw:
             visible_any = False
-            for i, (ch_name, ch_data) in enumerate(self.loader.result_channels.items()):
+            for i, (ch_name, ch_data) in enumerate(self.loader.result_channels_raw.items()):
                 visible = True
                 if hasattr(self, '_result_vars') and ch_name in self._result_vars:
                     visible = self._result_vars[ch_name].get()
@@ -1491,7 +1492,7 @@ class DinamikaApp:
         time = self.loader.dynamics_time
         mask = (time >= x_start) & (time <= x_end)
         zero_point = self.loader.zero_point
-        DEVIATION_THRESHOLD = 0.02  # mm
+        DEVIATION_THRESHOLD = 0.0001  # mm
 
         names = []
         deviations = []

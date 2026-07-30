@@ -550,24 +550,30 @@ class Calculator:
             result_disp = Interpolator.calc_single_channel(tugriki_vals, cal_tug, cal_disp)
             raw_results[dn] = np.round(result_disp, 3)
         
-        # Шаг 2: Для каждого слоя находим свой baseline (усредненный ноль)
+        # Шаг 2: Сохраняем сырые результаты для графика "Перемещение от времени"
+        # (без приведения к локальному нулю)
+        self.loader.result_channels_raw = raw_results.copy()
+        
+        # Шаг 3: Для каждого слоя находим свой baseline (усредненный ноль)
         layer_baselines = {}
         for dn, disp_vals in raw_results.items():
             layer_baselines[dn] = SignalAnalyzer.find_baseline(disp_vals)
         
-        # Шаг 3: Центрируем каждый слой относительно своего нуля
+        # Шаг 4: Центрируем каждый слой относительно своего нуля для графика "Пиковые значения"
         centered_results = {}
         for dn, disp_vals in raw_results.items():
             centered_results[dn] = disp_vals - layer_baselines[dn]
         
-        # Шаг 4: Находим общий ноль для отображения (минимум из всех baseline'ов)
+        # Шаг 5: Находим общий ноль для отображения (минимум из всех baseline'ов)
         if layer_baselines:
             common_zero = min(layer_baselines.values())
         else:
             common_zero = 0.0
         
-        # Шаг 5: Сохраняем результаты и обновляем информацию о нулях
+        # Шаг 6: Сохраняем результаты и обновляем информацию о нулях
+        # result_channels используется для графика "Пиковые значения" (с центрированием)
         self.loader.result_channels = centered_results
+        # result_channels_raw используется для графика "Перемещение от времени" (без центрирования)
         self.loader.channel_baselines = layer_baselines
         self.loader.channel_mins = layer_baselines.copy()
         self.loader.auto_zero_point = common_zero
