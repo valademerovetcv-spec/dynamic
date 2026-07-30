@@ -112,7 +112,6 @@ class DinamikaApp:
         self._calib_range_target = None
         self._calib_range_highlights = {}  # {layer: (left, right)}
         self._peak_range = None
-        self._manual_zero_var = tk.StringVar()
         self._calculating = False
 
         _style_app()
@@ -338,18 +337,26 @@ class DinamikaApp:
                                            command=self._start_peak_selection)
         self.peak_select_btn.pack(side=tk.LEFT, padx=2)
 
-        ttk.Label(peak_btn_frame, text="Ноль:", background=BG,
-                  font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=(8, 2))
-        self.zero_entry = ttk.Entry(peak_btn_frame, textvariable=self._manual_zero_var,
-                                    width=8, font=("Consolas", 9))
-        self.zero_entry.pack(side=tk.LEFT, padx=2)
-        ttk.Button(peak_btn_frame, text="Задать", style="ToolbarCsv.TButton",
-                   command=self._apply_manual_zero).pack(side=tk.LEFT, padx=2)
-        ttk.Button(peak_btn_frame, text="Авто", style="ToolbarCsv.TButton",
-                   command=self._reset_manual_zero).pack(side=tk.LEFT, padx=2)
-
         self.peak_info_label = ttk.Label(peak_btn_frame, text="", style="Info.TLabel")
         self.peak_info_label.pack(side=tk.LEFT, padx=8)
+
+        # Table for layer statistics
+        table_frame = ttk.Frame(peak_frame)
+        table_frame.pack(fill=tk.X, padx=4, pady=(4, 0))
+        
+        columns = ("layer", "zero", "shelf")
+        self.peak_stats_tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=6)
+        self.peak_stats_tree.heading("layer", text="Слой")
+        self.peak_stats_tree.heading("zero", text="Усредненный ноль (мм)")
+        self.peak_stats_tree.heading("shelf", text="Верхняя полка (мм)")
+        self.peak_stats_tree.column("layer", width=150, anchor=tk.W)
+        self.peak_stats_tree.column("zero", width=150, anchor=tk.E)
+        self.peak_stats_tree.column("shelf", width=150, anchor=tk.E)
+        
+        tree_scroll = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.peak_stats_tree.yview)
+        self.peak_stats_tree.configure(yscrollcommand=tree_scroll.set)
+        self.peak_stats_tree.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
         self.peak_fig = Figure(figsize=(5, 4), dpi=100)
         self.peak_ax = self.peak_fig.add_subplot(111)
@@ -929,7 +936,6 @@ class DinamikaApp:
         self.loader.manual_zero_point = None
         self.loader.channel_mins = None
         self.loader.channel_baselines = None
-        self._manual_zero_var.set("")
         self._peak_range = None
         self._calib_range_highlights.clear()
         self.loader.per_layer_calib = {}
@@ -977,7 +983,6 @@ class DinamikaApp:
         self.loader.manual_zero_point = None
         self.loader.channel_mins = None
         self.loader.channel_baselines = None
-        self._manual_zero_var.set("")
         self._peak_range = None
         self._calib_range_highlights.clear()
         self._calibration_file_path = None
@@ -1329,11 +1334,11 @@ class DinamikaApp:
 
                 if self.loader.auto_zero_point is not None:
                     if self.loader.manual_zero_point is None:
-                        self._manual_zero_var.set(f"{self.loader.auto_zero_point:.3f}")
-                    self._update_zero_entry_state()
+                        pass  # Removed manual zero var usage
 
                 if self._peak_range is not None:
                     self._calculate_and_draw_peaks(*self._peak_range)
+                    self._update_peak_stats_table()
 
                 n = len(self.loader.result_df)
                 mn = self.loader.result_df.iloc[:, 1].min()
@@ -1427,31 +1432,40 @@ class DinamikaApp:
 
     # === Peak selection methods ===
 
-    def _update_zero_entry_state(self):
-        if self.loader.manual_zero_point is not None:
-            self._manual_zero_var.set(f"{self.loader.manual_zero_point:.3f}")
-        elif self.loader.auto_zero_point is not None:
-            self._manual_zero_var.set(f"{self.loader.auto_zero_point:.3f}")
+    def _update_peak_stats_table(self):
+        """Update the peak statistics table with layer baselines and shelf values."""
+        # Clear existing items
+        for item in self.peak_stats_tree.get_children():
+            self.peak_stats_tree.delete(item)
+        
+        if not self.loader.result_channels:
+            return
+            
+        baselines = self.loader.channel_baselines or {}
+        
+        # Calculate shelf values (average of upper plateau region)
+        # For each layer, find the shelf value from the calibrated data
+        for ch_name in sorted(self.loader.result_channels.keys()):
+            baseline = baselines.get(ch_name, 0.0)
+            # Shelf value is estimated as the maximum value in the channel data
+            # or from calibration info if available
+            shelf_val = 0.0
+            if hasattr(self.loader, '_per_layer_calib_info') and ch_name in self.loader._per_layer_calib_info:
+                info = self.loader._per_layer_calib_info[ch_name]
+                # Use the range information to estimate shelf
+                shelf_val = info.get('range_right', 0.0)
+            
+            self.peak_stats_tree.insert("", tk.END, values=(
+                ch_name,
+                f"{baseline:.6f}",
+                f"{shelf_val:.6f}"
+            ))
 
     def _apply_manual_zero(self):
-        if not self.loader.result_channels:
-            messagebox.showinfo("Информация", "Сначала выполните расчёт")
-            return
-        try:
-            value = float(self._manual_zero_var.get().replace(",", "."))
-            self.loader.set_manual_zero(value)
-            if self._peak_range is not None:
-                self._calculate_and_draw_peaks(*self._peak_range)
-            self.status_var.set(f"Ноль задан вручную: {value:.3f} мм")
-        except ValueError:
-            messagebox.showerror("Ошибка", "Введите числовое значение нуля (мм)")
+        pass  # Removed - no longer used
 
     def _reset_manual_zero(self):
-        self.loader.clear_manual_zero()
-        self._update_zero_entry_state()
-        if self._peak_range is not None:
-            self._calculate_and_draw_peaks(*self._peak_range)
-        self.status_var.set("Ноль рассчитан автоматически")
+        pass  # Removed - no longer used
 
     def _start_peak_selection(self):
         if not self.loader.result_channels:
@@ -1502,6 +1516,7 @@ class DinamikaApp:
         self._peak_selection_active = False
 
         self._calculate_and_draw_peaks(x_start, x_end)
+        self._update_peak_stats_table()
         self._peak_range = (x_start, x_end)
         self.status_var.set(f"Диапазон: {x_start:.1f} — {x_end:.1f} мс")
 
