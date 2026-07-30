@@ -605,13 +605,12 @@ class Calculator:
             else self.loader.auto_zero_point
         )
 
-        if self.loader.result_channels:
-            key = list(self.loader.result_channels.keys())[0]
-            # Для result_df используем центрированные данные для таблицы "Результат расчёта"
-            # (те же данные, по которым строится график "Пиковые значения")
+        if self.loader.result_channels_raw:
+            key = list(self.loader.result_channels_raw.keys())[0]
+            # Для result_df используем исходные данные (без центрирования) для таблицы "Результат расчёта"
             self.loader.result_df = pd.DataFrame({
                 "Время, мсек": time_vals,
-                "Перемещение, мм": self.loader.result_channels[key]
+                "Перемещение, мм": self.loader.result_channels_raw[key]
             })
         else:
             self.loader.zero_point = None

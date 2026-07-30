@@ -340,28 +340,6 @@ class DinamikaApp:
         self.peak_info_label = ttk.Label(peak_btn_frame, text="", style="Info.TLabel")
         self.peak_info_label.pack(side=tk.LEFT, padx=8)
 
-        # Table for layer statistics
-        table_frame = ttk.Frame(peak_frame)
-        table_frame.pack(fill=tk.X, padx=4, pady=(4, 0))
-        
-        columns = ("layer", "zero", "plateau1", "peak", "plateau2")
-        self.peak_stats_tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=6)
-        self.peak_stats_tree.heading("layer", text="Слой")
-        self.peak_stats_tree.heading("zero", text="Усредненный ноль (мм)")
-        self.peak_stats_tree.heading("plateau1", text="Первое плато (мм)")
-        self.peak_stats_tree.heading("peak", text="Пик (мм)")
-        self.peak_stats_tree.heading("plateau2", text="Второе плато (мм)")
-        self.peak_stats_tree.column("layer", width=120, anchor=tk.W)
-        self.peak_stats_tree.column("zero", width=130, anchor=tk.E)
-        self.peak_stats_tree.column("plateau1", width=130, anchor=tk.E)
-        self.peak_stats_tree.column("peak", width=130, anchor=tk.E)
-        self.peak_stats_tree.column("plateau2", width=130, anchor=tk.E)
-        
-        tree_scroll = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.peak_stats_tree.yview)
-        self.peak_stats_tree.configure(yscrollcommand=tree_scroll.set)
-        self.peak_stats_tree.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-
         self.peak_fig = Figure(figsize=(5, 4), dpi=100)
         self.peak_ax = self.peak_fig.add_subplot(111)
         self.peak_canvas = FigureCanvasTkAgg(self.peak_fig, master=peak_frame)
@@ -1342,7 +1320,6 @@ class DinamikaApp:
 
                 if self._peak_range is not None:
                     self._calculate_and_draw_peaks(*self._peak_range)
-                    self._update_peak_stats_table()
 
                 n = len(self.loader.result_df)
                 mn = self.loader.result_df.iloc[:, 1].min()
@@ -1436,51 +1413,6 @@ class DinamikaApp:
 
     # === Peak selection methods ===
 
-    def _update_peak_stats_table(self):
-        """Update the peak statistics table with layer baselines and shelf values."""
-        # Clear existing items
-        for item in self.peak_stats_tree.get_children():
-            self.peak_stats_tree.delete(item)
-        
-        if not self.loader.result_channels:
-            return
-            
-        baselines = self.loader.channel_baselines or {}
-        
-        # Calculate shelf values (average of upper plateau region)
-        # For each layer, find the shelf value from the calibrated data
-        for ch_name in sorted(self.loader.result_channels.keys()):
-            baseline = baselines.get(ch_name, 0.0)
-            
-            # Get plateau1, peak, and plateau2 values from calibration info
-            plateau1_val = baseline  # Усредненный ноль = Первое плато
-            peak_val = 0.0
-            plateau2_val = 0.0
-            
-            if hasattr(self.loader, '_per_layer_calib_info') and ch_name in self.loader._per_layer_calib_info:
-                info = self.loader._per_layer_calib_info[ch_name]
-                # Первое плато равно базовой линии (усредненному нулю)
-                plateau1_val = baseline
-                # Второе плато - среднее значение после пика
-                plateau2_val = info.get('plateau2', 0.0)
-            
-            # Пик - наибольшее абсолютное отклонение от базовой линии на всём сигнале
-            # Это значение должно совпадать с тем, что используется для расчёта прогиба
-            if ch_name in self.loader.result_channels:
-                channel_data = self.loader.result_channels[ch_name]
-                # Находим максимальное абсолютное отклонение от baseline
-                # result_channels уже содержит центрированные данные (смещённые на baseline)
-                # поэтому пик - это просто максимальное абсолютное значение в центрированных данных
-                peak_val = float(np.max(np.abs(channel_data)))
-            
-            self.peak_stats_tree.insert("", tk.END, values=(
-                ch_name,
-                f"{baseline:.6f}",
-                f"{plateau1_val:.6f}",
-                f"{peak_val:.6f}",
-                f"{plateau2_val:.6f}" if plateau2_val != 0.0 else "-"
-            ))
-
     def _apply_manual_zero(self):
         pass  # Removed - no longer used
 
@@ -1536,7 +1468,6 @@ class DinamikaApp:
         self._peak_selection_active = False
 
         self._calculate_and_draw_peaks(x_start, x_end)
-        self._update_peak_stats_table()
         self._peak_range = (x_start, x_end)
         self.status_var.set(f"Диапазон: {x_start:.1f} — {x_end:.1f} мс")
 
