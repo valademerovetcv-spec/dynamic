@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 from .interpolator import Interpolator
+from models.analyzers import SignalAnalyzer
 
 
 class Calculator:
@@ -91,7 +92,7 @@ class Calculator:
             return
 
         self.loader.channel_baselines = {
-            ch: self.loader._find_baseline(data)
+            ch: SignalAnalyzer.find_baseline(data)
             for ch, data in self.loader.result_channels.items()
         }
         self.loader.channel_mins = self.loader.channel_baselines.copy()

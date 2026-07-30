@@ -14,6 +14,7 @@ import matplotlib.dates as mdates
 from pathlib import Path
 
 from calc import DataLoader
+from core.calculator import Calculator
 
 BG = "#f0f2f5"
 FG = "#1a1a2e"
@@ -94,6 +95,7 @@ class DinamikaApp:
         self.root.configure(bg=BG)
 
         self.loader = DataLoader()
+        self.calculator = Calculator(self.loader)
         self._file_path = None
         self._channel_visibility = {}
         self._dynamics_file_path = None
@@ -1035,7 +1037,7 @@ class DinamikaApp:
                     if auto_range:
                         auto_left, auto_right = auto_range
                     else:
-                        auto_left, auto_right = self.loader._find_layer_overlap(cal["disp"], cal["tug"])
+                        auto_left, auto_right = self.calculator._find_layer_overlap(cal["disp"], cal["tug"])
                     if not auto_sensor or auto_sensor not in sensor_names:
                         auto_sensor = sensor_names[0]
                     info = {
@@ -1058,7 +1060,7 @@ class DinamikaApp:
             info = self.loader._global_calib_info
             sensor_names = list(self.loader.calib_channels.keys())
             if not info:
-                auto_left, auto_right = self.loader._find_overlap_region()
+                auto_left, auto_right = self.calculator._find_overlap_region()
                 info = {
                     "sensor": sensor_names[0] if sensor_names else "",
                     "range_left": auto_left,
@@ -1648,7 +1650,7 @@ class DinamikaApp:
         """Рисует тарировку: восходящий участок ярко, скат — бледно."""
         disp = np.asarray(disp, dtype=float)
         tug = np.asarray(tug, dtype=float)
-        min_idx, peak_idx = self.loader._find_rising_indices(tug)
+        min_idx, peak_idx = self.calculator._find_rising_indices(tug)
 
         if min_idx > 0:
             ax.plot(disp[:min_idx + 1], tug[:min_idx + 1],

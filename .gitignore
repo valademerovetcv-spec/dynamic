@@ -1,55 +1,80 @@
-```python
+```gitignore
 # Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
+*.pyc
+*.pyo
+*.pyd
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Environment
-.venv/
-venv/
 env/
-ENV/
+venv/
+.venv/
+.ENV
+.venv.bak/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Generated/compiled files
+*.class
+*.o
+*.obj
+*.out
+*.exe
+*.dll
+*.so
+*.a
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# Testing
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+
+# Logs
+*.log
+
+# Environment variables
+.env
+.env.local
+.env.*
+!.env.example
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# Logs
-*.log
-
-# Coverage
-.coverage
-coverage/
-htmlcov/
-
-# Testing
-.pytest_cache/
-.mypy_cache/
+*~
 
 # OS
 .DS_Store
 Thumbs.db
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pytest
+.pytest_cache/
+
+# Coverage
+.coverage*
+
+# Temporary files
+*.tmp
+*.temp
 ```
 
-Wait, I need to reconsider. The only modified file is 'core/calculator.py' which is a Python source file. There are no build artifacts, dependencies, or temporary files in the changes provided. According to rule 6, if the change list contains only source files and no build artifacts, dependencies, or temp files, I should output an empty .gitignore.
+Wait, I need to reconsider. The file changes only include source code files (`app.py`, `core/calculator.py`) with no build artifacts, dependencies, or temporary files. Following rule #6, I should output nothing.
 
-(empty)
+```gitignore
+
+```
