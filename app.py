@@ -1453,23 +1453,25 @@ class DinamikaApp:
             baseline = baselines.get(ch_name, 0.0)
             
             # Get plateau1, peak, and plateau2 values from calibration info
-            plateau1_val = 0.0
+            plateau1_val = baseline  # Усредненный ноль = Первое плато
             peak_val = 0.0
             plateau2_val = 0.0
             
             if hasattr(self.loader, '_per_layer_calib_info') and ch_name in self.loader._per_layer_calib_info:
                 info = self.loader._per_layer_calib_info[ch_name]
-                # Use the calculated plateau and peak values
-                plateau1_val = info.get('plateau1', 0.0)
-                peak_val = info.get('peak', 0.0)  # This is the peak value used for deflection calculation
-                plateau2_val = info.get('plateau2', 0.0)  # Second plateau after peak
+                # Первое плато равно базовой линии (усредненному нулю)
+                plateau1_val = baseline
+                # Пик - максимальное отклонение от базовой линии (используется в расчете прогиба)
+                peak_val = info.get('peak', 0.0)
+                # Второе плато - среднее значение после пика
+                plateau2_val = info.get('plateau2', 0.0)
             
             self.peak_stats_tree.insert("", tk.END, values=(
                 ch_name,
                 f"{baseline:.6f}",
                 f"{plateau1_val:.6f}",
                 f"{peak_val:.6f}",
-                f"{plateau2_val:.6f}"
+                f"{plateau2_val:.6f}" if plateau2_val != 0.0 else "-"
             ))
 
     def _apply_manual_zero(self):
