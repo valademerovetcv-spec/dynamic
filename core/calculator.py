@@ -533,6 +533,25 @@ class Calculator:
             cal_disp, cal_tug = Interpolator.extract_rising_branch(
                 disp, tug, range_left=range_left, range_right=range_right
             )
+            
+            # Вычисляем значения для статистики: первое плато, пик, второе плато
+            # Первое плато - среднее значение до пика (в начале диапазона)
+            # Пик - максимальное значение в диапазоне калибровки
+            # Второе плато - среднее значение после пика
+            
+            # Находим индекс пика в калибровочных данных
+            peak_idx = np.argmax(cal_disp)
+            
+            # Первое плато - среднее значение в первой трети диапазона до пика
+            plateau1_end = max(1, peak_idx // 3)
+            plateau1_val = float(np.mean(cal_disp[:plateau1_end])) if plateau1_end > 0 else float(cal_disp[0])
+            
+            # Пик - максимальное значение
+            peak_val = float(cal_disp[peak_idx])
+            
+            # Второе плато - среднее значение в последней трети диапазона после пика
+            plateau2_start = min(len(cal_disp) - 1, peak_idx + (len(cal_disp) - peak_idx) * 2 // 3)
+            plateau2_val = float(np.mean(cal_disp[plateau2_start:])) if plateau2_start < len(cal_disp) else float(cal_disp[-1])
 
             self.loader._per_layer_calib_info[dn] = {
                 "sensor": selected,
@@ -544,6 +563,9 @@ class Calculator:
                 "manual_sensor": manual_sensor is not None,
                 "manual_range": "range_left" in manual or "range_right" in manual,
                 "magnet_x": self.loader._per_layer_magnet_x.get(dn),
+                "plateau1": plateau1_val,
+                "peak": peak_val,
+                "plateau2": plateau2_val,
             }
 
             # Расчёт перемещения с использованием интерполяции

@@ -1459,10 +1459,10 @@ class DinamikaApp:
             
             if hasattr(self.loader, '_per_layer_calib_info') and ch_name in self.loader._per_layer_calib_info:
                 info = self.loader._per_layer_calib_info[ch_name]
-                # Use the range information to estimate plateaus and peak
-                plateau1_val = info.get('range_left', 0.0)
-                peak_val = info.get('range_right', 0.0)  # This is the peak value used for deflection calculation
-                plateau2_val = info.get('range_right2', 0.0)  # Second plateau after peak
+                # Use the calculated plateau and peak values
+                plateau1_val = info.get('plateau1', 0.0)
+                peak_val = info.get('peak', 0.0)  # This is the peak value used for deflection calculation
+                plateau2_val = info.get('plateau2', 0.0)  # Second plateau after peak
             
             self.peak_stats_tree.insert("", tk.END, values=(
                 ch_name,
