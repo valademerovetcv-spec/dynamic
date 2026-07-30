@@ -1378,7 +1378,7 @@ class DinamikaApp:
         self.result_ax.clear()
         self.result_ax.set_title("Перемещение от времени")
 
-        # Используем result_channels_raw для графика "Перемещение от времени" (без центрирования)
+        # График "Перемещение от времени" должен показывать сырые данные (без центрирования)
         if hasattr(self.loader, 'result_channels_raw') and self.loader.result_channels_raw:
             visible_any = False
             for i, (ch_name, ch_data) in enumerate(self.loader.result_channels_raw.items()):
@@ -1465,11 +1465,13 @@ class DinamikaApp:
                 plateau2_val = info.get('plateau2', 0.0)
             
             # Пик - наибольшее абсолютное отклонение от базовой линии на всём сигнале
+            # Это значение должно совпадать с тем, что используется для расчёта прогиба
             if ch_name in self.loader.result_channels:
                 channel_data = self.loader.result_channels[ch_name]
                 # Находим максимальное абсолютное отклонение от baseline
-                deviations = np.abs(channel_data - baseline)
-                peak_val = float(np.max(deviations))
+                # result_channels уже содержит центрированные данные (смещённые на baseline)
+                # поэтому пик - это просто максимальное абсолютное значение в центрированных данных
+                peak_val = float(np.max(np.abs(channel_data)))
             
             self.peak_stats_tree.insert("", tk.END, values=(
                 ch_name,
