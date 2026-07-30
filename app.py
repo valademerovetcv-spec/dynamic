@@ -344,14 +344,18 @@ class DinamikaApp:
         table_frame = ttk.Frame(peak_frame)
         table_frame.pack(fill=tk.X, padx=4, pady=(4, 0))
         
-        columns = ("layer", "zero", "shelf")
+        columns = ("layer", "zero", "plateau1", "peak", "plateau2")
         self.peak_stats_tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=6)
         self.peak_stats_tree.heading("layer", text="Слой")
         self.peak_stats_tree.heading("zero", text="Усредненный ноль (мм)")
-        self.peak_stats_tree.heading("shelf", text="Верхняя полка (мм)")
-        self.peak_stats_tree.column("layer", width=150, anchor=tk.W)
-        self.peak_stats_tree.column("zero", width=150, anchor=tk.E)
-        self.peak_stats_tree.column("shelf", width=150, anchor=tk.E)
+        self.peak_stats_tree.heading("plateau1", text="Первое плато (мм)")
+        self.peak_stats_tree.heading("peak", text="Пик (мм)")
+        self.peak_stats_tree.heading("plateau2", text="Второе плато (мм)")
+        self.peak_stats_tree.column("layer", width=120, anchor=tk.W)
+        self.peak_stats_tree.column("zero", width=130, anchor=tk.E)
+        self.peak_stats_tree.column("plateau1", width=130, anchor=tk.E)
+        self.peak_stats_tree.column("peak", width=130, anchor=tk.E)
+        self.peak_stats_tree.column("plateau2", width=130, anchor=tk.E)
         
         tree_scroll = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.peak_stats_tree.yview)
         self.peak_stats_tree.configure(yscrollcommand=tree_scroll.set)
@@ -1447,18 +1451,25 @@ class DinamikaApp:
         # For each layer, find the shelf value from the calibrated data
         for ch_name in sorted(self.loader.result_channels.keys()):
             baseline = baselines.get(ch_name, 0.0)
-            # Shelf value is estimated as the maximum value in the channel data
-            # or from calibration info if available
-            shelf_val = 0.0
+            
+            # Get plateau1, peak, and plateau2 values from calibration info
+            plateau1_val = 0.0
+            peak_val = 0.0
+            plateau2_val = 0.0
+            
             if hasattr(self.loader, '_per_layer_calib_info') and ch_name in self.loader._per_layer_calib_info:
                 info = self.loader._per_layer_calib_info[ch_name]
-                # Use the range information to estimate shelf
-                shelf_val = info.get('range_right', 0.0)
+                # Use the range information to estimate plateaus and peak
+                plateau1_val = info.get('range_left', 0.0)
+                peak_val = info.get('range_right', 0.0)  # This is the peak value used for deflection calculation
+                plateau2_val = info.get('range_right2', 0.0)  # Second plateau after peak
             
             self.peak_stats_tree.insert("", tk.END, values=(
                 ch_name,
                 f"{baseline:.6f}",
-                f"{shelf_val:.6f}"
+                f"{plateau1_val:.6f}",
+                f"{peak_val:.6f}",
+                f"{plateau2_val:.6f}"
             ))
 
     def _apply_manual_zero(self):
