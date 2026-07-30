@@ -373,6 +373,8 @@ class Calculator:
 
         if self.loader.result_channels:
             self._update_zero_and_baselines()
+            # Сохраняем сырые результаты для графика \"Перемещение от времени\" (без центрирования)
+            self.loader.result_channels_raw = self.loader.result_channels.copy()
             key = list(self.loader.result_channels.keys())[0]
             self.loader.result_df = pd.DataFrame({
                 "Время, мсек": time_vals,

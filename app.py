@@ -1340,7 +1340,13 @@ class DinamikaApp:
                     if self.loader.manual_zero_point is None:
                         pass  # Removed manual zero var usage
 
-                if self._peak_range is not None:
+                # Автоматически строим Пиковые значения после расчёта перемещений
+                if has_per_layer:
+                    self._update_peak_stats_table()
+                    # Если есть сохранённый диапазон пиков, используем его
+                    if hasattr(self, '_peak_range') and self._peak_range is not None:
+                        self._calculate_and_draw_peaks(*self._peak_range)
+                elif self._peak_range is not None:
                     self._calculate_and_draw_peaks(*self._peak_range)
                     self._update_peak_stats_table()
 
@@ -1464,12 +1470,16 @@ class DinamikaApp:
                 # Второе плато - среднее значение после пика
                 plateau2_val = info.get('plateau2', 0.0)
             
-            # Пик - наибольшее абсолютное отклонение от базовой линии на всём сигнале
-            if ch_name in self.loader.result_channels:
+            # Пик - наибольшее значение перемещения из всего массива для каждого слоя
+            # Используем result_channels_raw (сырые данные без центрирования)
+            if hasattr(self.loader, 'result_channels_raw') and ch_name in self.loader.result_channels_raw:
+                channel_data = self.loader.result_channels_raw[ch_name]
+                # Находим максимальное значение (наибольшее перемещение)
+                peak_val = float(np.max(channel_data))
+            elif ch_name in self.loader.result_channels:
+                # Если нет сырых данных, используем центрированные
                 channel_data = self.loader.result_channels[ch_name]
-                # Находим максимальное абсолютное отклонение от baseline
-                deviations = np.abs(channel_data - baseline)
-                peak_val = float(np.max(deviations))
+                peak_val = float(np.max(channel_data))
             
             self.peak_stats_tree.insert("", tk.END, values=(
                 ch_name,
