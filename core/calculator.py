@@ -4,6 +4,8 @@
 import numpy as np
 import pandas as pd
 
+from .interpolator import Interpolator
+
 
 class Calculator:
     """Класс для расчёта перемещений на основе калибровочных данных."""
