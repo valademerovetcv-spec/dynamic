@@ -1596,7 +1596,7 @@ class DinamikaApp:
             self._calculate_and_draw_peaks(*self._peak_range)
 
     def _calculate_and_draw_peaks(self, x_start, x_end):
-        if not self.loader.result_channels or self.loader.dynamics_time is None:
+        if not self.loader.result_channels_raw or self.loader.dynamics_time is None:
             return
         baselines = self.loader.channel_baselines or self.loader.channel_mins
         if self.loader.zero_point is None or baselines is None:
@@ -1633,9 +1633,9 @@ class DinamikaApp:
         deviations = []
         peak_values = []
         distance_positions = []
-        value_ranges = []  # Для хранения диапазона значений вокруг пика
+        range_data = []  # Для хранения данных диапазона вокруг пика
         
-        for ch_name, ch_data in self.loader.result_channels.items():
+        for ch_name, ch_data in self.loader.result_channels_raw.items():
             if ch_name not in baselines:
                 continue
             ch_in_range = ch_data[mask]
@@ -1655,16 +1655,24 @@ class DinamikaApp:
                 continue
             
             # Находим позицию пика (максимального значения)
-            peak_idx = np.argmax(ch_in_range)
-            peak_distance = distance_in_range[peak_idx]
+            peak_idx_local = np.argmax(ch_in_range)
+            peak_distance = distance_in_range[peak_idx_local]
+            
+            # Берем диапазон вокруг пика (±10 точек или меньше, если не хватает данных)
+            window_size = 10
+            start_idx = max(0, peak_idx_local - window_size)
+            end_idx = min(len(ch_in_range), peak_idx_local + window_size + 1)
+            
+            range_distances = distance_in_range[start_idx:end_idx]
+            range_values = ch_in_range[start_idx:end_idx]
             
             names.append(ch_name)
             deviations.append(deviation)
             peak_values.append(max_in_range)
             distance_positions.append(peak_distance)
-            
-            # Сохраняем диапазон значений (мин, макс, среднее) для отображения
-            value_ranges.append({
+            range_data.append({
+                'distances': range_distances,
+                'values': range_values,
                 'min': min_in_range,
                 'max': max_in_range,
                 'mean': float(np.mean(ch_in_range)),
@@ -1698,43 +1706,46 @@ class DinamikaApp:
         n = len(names)
         max_dev = max(deviations)
         max_dist = max(distance_positions) if distance_positions else 1
+        min_peak_val = min(peak_values) if peak_values else 0
+        max_peak_val = max(peak_values) if peak_values else 0
+        
+        # Определяем диапазон для оси Y (перемещение)
+        y_range = max_peak_val - min_peak_val if max_peak_val != min_peak_val else 1.0
+        y_margin = y_range * 0.2
+        y_min = min_peak_val - y_margin
+        y_max = max_peak_val + y_margin
 
+        # Рисуем нулевую линию
         y_zero = 0.0
         self.peak_ax.axhline(y=y_zero, color='#94a3b8', linestyle='-', alpha=0.4, linewidth=2, zorder=1)
         self.peak_ax.text(0, y_zero + 0.15, f"Ноль: {zero_point:.3f} мм ({zero_mode})",
                           fontsize=8, color='#64748b', ha='center', va='bottom')
 
-        for i, (name, dev, peak_val, dist_pos, val_range) in enumerate(zip(names, deviations, peak_values, distance_positions, value_ranges)):
-            y_point = -(i + 1) * 0.8
-            
+        for i, (name, dev, peak_val, dist_pos, r_data) in enumerate(zip(names, deviations, peak_values, distance_positions, range_data)):
             # Отображаем диапазон значений как вертикальную полосу
-            range_min = val_range['min']
-            range_max = val_range['max']
-            range_mean = val_range['mean']
-            range_std = val_range['std']
+            range_min = r_data['min']
+            range_max = r_data['max']
+            range_mean = r_data['mean']
+            range_std = r_data['std']
+            range_distances = r_data['distances']
+            range_values = r_data['values']
             
-            # Рисуем основную кривую профиля
-            t = np.linspace(0, 1, 100)
-            y_curve = y_point + (y_zero - y_point) * t
-            x_right = dev * np.sqrt(t)
-            x_left = -dev * np.sqrt(t)
-
-            self.peak_ax.fill_betweenx(y_curve, x_left, x_right,
-                                        alpha=0.10, color='#2563eb', zorder=2)
-            self.peak_ax.plot(x_right, y_curve, color='#2563eb', linewidth=2.5, alpha=0.9, zorder=3)
-            self.peak_ax.plot(x_left, y_curve, color='#2563eb', linewidth=2.5, alpha=0.9, zorder=3)
+            # Рисуем диапазон значений вокруг пика как кривую на графике расстояний
+            # Нормализуем расстояния относительно позиции пика
+            if len(range_distances) > 1:
+                norm_distances = range_distances - dist_pos  # Центрируем относительно пика
+                
+                # Рисуем кривую диапазона значений: по оси X - расстояние (м), по оси Y - перемещение (мм)
+                self.peak_ax.plot(norm_distances, range_values, color='#059669', linewidth=1.5, alpha=0.8, 
+                                 label=name if i == 0 else "", zorder=4)
+                
+                # Заполняем область под кривой
+                self.peak_ax.fill_between(norm_distances, range_values, alpha=0.15, color='#059669', zorder=3)
             
             # Рисуем точку пика
-            self.peak_ax.plot(0, y_point, 'o', color='#dc2626', markersize=10,
-                              markeredgecolor='white', markeredgewidth=2, zorder=5)
-            
-            # Рисуем диапазон значений как вертикальную линию с усиками
-            self.peak_ax.plot([0, 0], [y_point - 0.3, y_point + 0.3], 
-                             color='#059669', linewidth=2, alpha=0.7, zorder=4)
-            self.peak_ax.plot([-0.1, 0.1], [y_point - 0.3, y_point - 0.3], 
-                             color='#059669', linewidth=1, alpha=0.7, zorder=4)
-            self.peak_ax.plot([-0.1, 0.1], [y_point + 0.3, y_point + 0.3], 
-                             color='#059669', linewidth=1, alpha=0.7, zorder=4)
+            self.peak_ax.plot(0, peak_val, 'o', color='#dc2626', markersize=8,
+                              markeredgecolor='white', markeredgewidth=2, zorder=5,
+                              label=f"{name} (пик)" if i == 0 else "")
 
             delta_text = ""
             if i > 0:
@@ -1744,27 +1755,30 @@ class DinamikaApp:
                 dist_delta_text = f" | Δx={distance_deltas[i - 1]:.2f} м"
             
             self.peak_ax.annotate(
-                f"  {name}: {dev:.3f} мм (пик {peak_val:.3f}){delta_text}\n  x={dist_pos:.2f} м [{range_min:.3f}..{range_max:.3f}] σ={range_std:.4f}{dist_delta_text}",
-                xy=(0, y_point), xytext=(max_dev * 0.15, y_point),
-                fontsize=7, va='center', color='#1e293b',
+                f"{name}: {dev:.3f} мм{delta_text}\nx={dist_pos:.2f} м [{range_min:.3f}..{range_max:.3f}] σ={range_std:.4f}{dist_delta_text}",
+                xy=(0, peak_val), xytext=(max_dist * 0.05, peak_val),
+                fontsize=7, va='center', ha='left', color='#1e293b',
                 bbox=dict(boxstyle='round,pad=0.2',
                           facecolor='#fef3c7', edgecolor='#f59e0b',
                           alpha=0.9), zorder=4)
 
             if i > 0:
-                y_prev = -(i) * 0.8
-                y_mid = (y_point + y_prev) / 2
+                y_prev = peak_values[i - 1]
+                y_mid = (peak_val + y_prev) / 2
                 self.peak_ax.annotate(
-                    '', xy=(max_dev * 0.55, y_prev), xytext=(max_dev * 0.55, y_point),
+                    '', xy=(max_dist * 0.03, y_prev), xytext=(max_dist * 0.03, peak_val),
                     arrowprops=dict(arrowstyle='<->', color='#059669', lw=1.5),
                     zorder=4)
-                self.peak_ax.text(max_dev * 0.62, y_mid,
+                self.peak_ax.text(max_dist * 0.04, y_mid,
                                   f"Δ {deltas[i - 1]:.3f} мм",
                                   fontsize=7, color='#059669', va='center', fontweight='bold')
 
-        self.peak_ax.set_xlim(-max_dev * 1.3, max_dev * 1.8)
-        self.peak_ax.set_xlabel("Отклонение от нуля, мм")
-        self.peak_ax.grid(True, axis='x', alpha=0.2)
+        self.peak_ax.set_xlim(-max_dist * 0.5, max_dist * 1.5)
+        self.peak_ax.set_ylim(y_min, y_max)
+        self.peak_ax.set_xlabel("Расстояние от пика, м")
+        self.peak_ax.set_ylabel("Перемещение, мм")
+        self.peak_ax.legend(loc="upper right", fontsize=7)
+        self.peak_ax.grid(True, alpha=0.2)
 
         delta_parts = [f"{d:.3f} мм" for d in deltas]
         delta_str = " | Δ: " + ", ".join(delta_parts) if delta_parts else ""
