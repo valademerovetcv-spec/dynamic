@@ -1280,6 +1280,9 @@ class DinamikaApp:
                         self.loader.clear_layer_manual(layer_name)
 
             self.calculate()
+            # Восстанавливаем возможность выбора диапазона для пиков после применения настроек тарировки
+            if self._peak_range is not None:
+                self.peak_select_btn.configure(state="normal")
             self.status_var.set("Настройки тарировки применены")
         except ValueError:
             messagebox.showerror("Ошибка", "Проверьте числовые значения диапазона (мм)")
@@ -1444,6 +1447,8 @@ class DinamikaApp:
 
                 if self._peak_range is not None:
                     self._calculate_and_draw_peaks(*self._peak_range)
+                    # Разблокируем кнопку выбора диапазона после перерисовки пиков
+                    self.peak_select_btn.configure(state="normal")
 
                 n = len(self.loader.result_df)
                 mn = self.loader.result_df.iloc[:, 1].min()
@@ -1557,6 +1562,17 @@ class DinamikaApp:
         if not self.loader.result_channels:
             messagebox.showinfo("Информация", "Сначала загрузите данные и выполните расчёт")
             return
+        # Проверяем, что скорость введена корректно
+        try:
+            speed_kmh = float(self.peak_speed_var.get())
+            speed_cm_s = speed_kmh * 100000 / 3600
+            if speed_cm_s <= 0:
+                messagebox.showwarning("Предупреждение", "Скорость автомобиля должна быть больше 0")
+                return
+        except (ValueError, TypeError):
+            messagebox.showwarning("Предупреждение", "Введите корректное значение скорости")
+            return
+        
         self._disconnect_peak_handlers()
         self._peak_selection_active = True
         self._peak_selection_start = None
