@@ -11,17 +11,26 @@ class ExcelLoader:
     
     def load_excel(self, path):
         """Загрузка данных из Excel файла (основной формат)."""
-        # Быстрая загрузка через pandas - читаем весь файл сразу
-        df = pd.read_excel(path, header=None, engine='openpyxl')
+        # Быстрая загрузка через pandas с оптимизациями
+        # Используем openpyxl в режиме read_only для ускорения чтения больших файлов
+        wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+        ws = wb.active
         
-        if len(df) < 2:
+        # Читаем все данные сразу в память через генератор - быстрее чем iter_rows
+        all_data = list(ws.iter_rows(values_only=True))
+        wb.close()
+        
+        if len(all_data) < 2:
             return self._load_excel_legacy(path)
         
-        # Получаем заголовки из первых двух строк
-        row1 = df.iloc[0].tolist()
-        row2 = df.iloc[1].tolist()
+        # Конвертируем в numpy массив для быстрой обработки
+        data_array = np.array(all_data, dtype=object)
         
-        max_col = len(row1)
+        max_col = data_array.shape[1]
+        
+        # Получаем заголовки из первых двух строк
+        row1 = data_array[0].tolist()
+        row2 = data_array[1].tolist()
         
         # Находим секции
         cal_section = None
@@ -41,13 +50,13 @@ class ExcelLoader:
         
         dyn_section = 0
         
-        # Извлекаем все данные одним вызовом values - это быстрее
-        data_values = df.iloc[2:].values
+        # Извлекаем все данные одним срезом из numpy массива - это быстрее
+        data_values = data_array[2:].astype(float)
         
         # Время (первый столбец)
         time_raw = data_values[:, dyn_section]
-        time_mask = ~pd.isna(time_raw)
-        time_col = time_raw[time_mask].astype(float)
+        time_mask = ~np.isnan(time_raw)
+        time_col = time_raw[time_mask]
         n_time = len(time_col)
         
         # Каналы динамики (между dyn_section и cal_section)
@@ -57,8 +66,8 @@ class ExcelLoader:
             if not ch_name:
                 continue
             ch_raw = data_values[:, c]
-            ch_mask = ~pd.isna(ch_raw)
-            ch_vals = ch_raw[ch_mask].astype(float)
+            ch_mask = ~np.isnan(ch_raw)
+            ch_vals = ch_raw[ch_mask]
             n = min(n_time, len(ch_vals))
             if n > 0:
                 arr = ch_vals[:n]
@@ -82,8 +91,8 @@ class ExcelLoader:
         # Калибровочные данные
         if cal_section + 1 < max_col:
             cal_disp_raw = data_values[:, cal_section]
-            cal_disp_mask = ~pd.isna(cal_disp_raw)
-            cal_disp = cal_disp_raw[cal_disp_mask].astype(float)
+            cal_disp_mask = ~np.isnan(cal_disp_raw)
+            cal_disp = cal_disp_raw[cal_disp_mask]
             nc = len(cal_disp)
             cal_disp_name = row2[cal_section + 1] if cal_section + 1 < len(row2) else "Перемещение, мм"
             
@@ -94,8 +103,8 @@ class ExcelLoader:
                 if not ch_name:
                     continue
                 ch_raw = data_values[:, c]
-                ch_mask = ~pd.isna(ch_raw)
-                ch_vals = ch_raw[ch_mask].astype(float)
+                ch_mask = ~np.isnan(ch_raw)
+                ch_vals = ch_raw[ch_mask]
                 n = min(nc, len(ch_vals))
                 if n > 0:
                     arr = np.round(ch_vals[:n], 3)
@@ -123,8 +132,8 @@ class ExcelLoader:
         # Результаты если есть
         if res_section is not None and res_section + 1 < max_col:
             res_raw = data_values[:, res_section]
-            res_mask = ~pd.isna(res_raw)
-            res_time = res_raw[res_mask].astype(float)
+            res_mask = ~np.isnan(res_raw)
+            res_time = res_raw[res_mask]
             nr = len(res_time)
             
             self.result_channels = {}
@@ -133,8 +142,8 @@ class ExcelLoader:
                 if not ch_name:
                     continue
                 ch_raw = data_values[:, c]
-                ch_mask = ~pd.isna(ch_raw)
-                ch_vals = ch_raw[ch_mask].astype(float)
+                ch_mask = ~np.isnan(ch_raw)
+                ch_vals = ch_raw[ch_mask]
                 n = min(nr, len(ch_vals))
                 if n > 0:
                     self.result_channels[ch_name] = np.round(ch_vals[:n], 3)
@@ -250,45 +259,48 @@ class XLSXLoader:
     
     def load_dynamics_xlsx(self, path):
         """Загрузка данных динамики из XLSX."""
-        df = pd.read_excel(path, header=None)
+        # Оптимизированная загрузка с явным указанием типов
+        df = pd.read_excel(path, header=None, dtype=float)
         df = df.sort_values(by=0).reset_index(drop=True)
-        time_col = df.iloc[:, 0].values
+        time_col = df.iloc[:, 0].to_numpy(dtype=float)
         self.dynamics_time = time_col
         self.dynamics_channels = {}
         for i in range(1, df.shape[1]):
             col_name = f"Слой {i}"
-            ch_vals = df.iloc[:, i].values.astype(float)
+            ch_vals = df.iloc[:, i].to_numpy(dtype=float)
             if np.all(ch_vals == 0):
                 continue
             self.dynamics_channels[col_name] = ch_vals
         self.source_data = pd.DataFrame({
             "Время, мсек": time_col,
-            "Слои": df.iloc[:, 1].values
+            "Слои": df.iloc[:, 1].to_numpy(dtype=float)
         })
         return self.dynamics_time, self.dynamics_channels
 
     def load_calibration_xlsx(self, path):
         """Загрузка калибровочных данных из XLSX."""
-        df = pd.read_excel(path, header=None)
+        # Оптимизированная загрузка с явным указанием типов
+        df = pd.read_excel(path, header=None, dtype=float)
         df = df.sort_values(by=0).reset_index(drop=True)
-        disp_col = np.round(df.iloc[:, 0].values.astype(float), 3)
+        disp_col = np.round(df.iloc[:, 0].to_numpy(dtype=float), 3)
         self.calib_disp = disp_col
         self.calib_channels = {}
         for i in range(1, df.shape[1]):
             col_name = f"Слой {i}"
-            ch_vals = np.round(df.iloc[:, i].values.astype(float), 3)
+            ch_vals = np.round(df.iloc[:, i].to_numpy(dtype=float), 3)
             if np.all(ch_vals == 0):
                 continue
             self.calib_channels[col_name] = ch_vals
         self.calib_data = pd.DataFrame({
             "Перемещение, мм": disp_col,
-            "Датчик Холла": df.iloc[:, 1].values
+            "Датчик Холла": df.iloc[:, 1].to_numpy(dtype=float)
         })
         return self.calib_disp, self.calib_channels
 
     def load_temperature_xlsx(self, path):
         """Загрузка температурных данных из XLSX."""
-        df = pd.read_excel(path, header=0)
+        # Оптимизированная загрузка с явным указанием типов
+        df = pd.read_excel(path, header=0, dtype={'date': str})  # Дата как строка для парсинга
         df.columns = [c.strip() for c in df.columns]
         date_col = df.columns[0]
         dates = pd.to_datetime(df[date_col], format="%d.%m.%Y %H:%M", errors="coerce")
@@ -298,7 +310,7 @@ class XLSXLoader:
         self.temp_channels = {}
         idx = 1
         for col in df.columns[1:]:
-            vals = pd.to_numeric(df[col], errors="coerce").values
+            vals = pd.to_numeric(df[col], errors="coerce").to_numpy(dtype=float)
             if np.all(vals == 0):
                 continue
             self.temp_channels[f"Слой {idx}"] = vals
@@ -309,15 +321,15 @@ class XLSXLoader:
     def load_calibration_for_layer(self, path, layer_name):
         """Загрузка калибровки для конкретного слоя."""
         if path.lower().endswith('.xlsx'):
-            df = pd.read_excel(path, header=None)
+            df = pd.read_excel(path, header=None, dtype=float)
         else:
-            df = pd.read_csv(path, sep=";", header=None, decimal=",")
+            df = pd.read_csv(path, sep=";", header=None, decimal=",", dtype=float)
         df = df.sort_values(by=0).reset_index(drop=True)
-        disp_col = np.round(df.iloc[:, 0].values.astype(float), 3)
+        disp_col = np.round(df.iloc[:, 0].to_numpy(dtype=float), 3)
         tug_cols = {}
         for i in range(1, df.shape[1]):
             col_name = f"Датчик Холла {i}"
-            vals = np.round(df.iloc[:, i].values.astype(float), 3)
+            vals = np.round(df.iloc[:, i].to_numpy(dtype=float), 3)
             if not np.all(vals == 0):
                 tug_cols[col_name] = vals
         self.per_layer_calib[layer_name] = {"disp": disp_col, "tug": tug_cols}
