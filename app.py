@@ -1648,6 +1648,104 @@ class DinamikaApp:
         
         Данные приводятся к локальному нулю (среднее на полках) и общему нулю.
         """
+        # === СТАРАЯ РЕАЛИЗАЦИЯ ЗАКОММЕНТИРОВАНА ДЛЯ СПРАВКИ ===
+        # if not self.loader.result_channels or self.loader.dynamics_time is None:
+        #     messagebox.showinfo("Информация", "Сначала загрузите данные и выполните расчёт")
+        #     return
+        # 
+        # try:
+        #     speed_kmh = float(self.peak_speed_var.get())
+        #     speed_cm_s = speed_kmh * 100000 / 3600
+        #     if speed_cm_s <= 0:
+        #         messagebox.showwarning("Предупреждение", "Скорость автомобиля должна быть больше 0")
+        #         return
+        # except (ValueError, TypeError):
+        #     messagebox.showwarning("Предупреждение", "Введите корректное значение скорости")
+        #     return
+        # 
+        # time = self.loader.dynamics_time
+        # baselines = self.loader.channel_baselines or self.loader.channel_mins
+        # 
+        # if baselines is None:
+        #     messagebox.showinfo("Информация", "Данные тарировки не загружены")
+        #     return
+        # 
+        # mask = (time >= x_start) & (time <= x_end)
+        # 
+        # if not any(mask):
+        #     self.peak_ax.clear()
+        #     self.peak_ax.set_title("Профиль пиков")
+        #     self.peak_ax.text(0.5, 0.5, "Нет данных в выбранном диапазоне",
+        #                       ha="center", va="center", transform=self.peak_ax.transAxes,
+        #                       fontsize=11, color="#94a3b8", style="italic")
+        #     self.peak_ax.set_axis_off()
+        #     self.peak_fig.tight_layout()
+        #     self.peak_canvas.draw()
+        #     return
+        # 
+        # channel_data = {}
+        # for ch_name, ch_data in self.loader.result_channels.items():
+        #     if ch_name not in baselines:
+        #         continue
+        #     ch_in_range = ch_data[mask]
+        #     if len(ch_in_range) == 0:
+        #         continue
+        #     
+        #     baseline = baselines[ch_name]
+        #     localized_data = ch_in_range - baseline
+        #     channel_data[ch_name] = localized_data
+        # 
+        # if not channel_data:
+        #     self.peak_ax.clear()
+        #     self.peak_ax.set_title("Профиль пиков")
+        #     self.peak_ax.text(0.5, 0.5, "Нет данных каналов для отображения",
+        #                       ha="center", va="center", transform=self.peak_ax.transAxes,
+        #                       fontsize=11, color="#94a3b8", style="italic")
+        #     self.peak_ax.set_axis_off()
+        #     self.peak_fig.tight_layout()
+        #     self.peak_canvas.draw()
+        #     return
+        # 
+        # time_ms = time[mask]
+        # time_start = time_ms[0]
+        # time_relative = time_ms - time_start
+        # distance_m = (speed_cm_s / 100) * (time_relative / 1000)
+        # 
+        # self.peak_ax.clear()
+        # self.peak_ax.set_title(f"Профиль пиков — Прогиб (скорость {speed_kmh} км/ч = {speed_cm_s:.1f} см/с)")
+        # 
+        # colors = ["#4CAF50", "#2196F3", "#FF9800", "#E91E63", "#9C27B0", "#00BCD4", "#FF5722"]
+        # 
+        # max_deflection = 0
+        # for i, (ch_name, centered_data) in enumerate(channel_data.items()):
+        #     color = colors[i % len(colors)]
+        #     max_defl = float(np.max(np.abs(centered_data)))
+        #     max_deflection = max(max_deflection, max_defl)
+        #     
+        #     self.peak_ax.plot(distance_m, centered_data, color=color, linewidth=2, 
+        #                      label=ch_name, alpha=0.8)
+        # 
+        # self.peak_ax.axhline(y=0, color='#94a3b8', linestyle='--', alpha=0.5, linewidth=1.5)
+        # self.peak_ax.set_xlabel("Пройденное расстояние, м")
+        # self.peak_ax.set_ylabel("Прогиб, мм")
+        # self.peak_ax.grid(True, alpha=0.3)
+        # self.peak_ax.legend(loc='best', fontsize=8)
+        # 
+        # if max_deflection > 0:
+        #     y_margin = max_deflection * 0.1
+        #     self.peak_ax.set_ylim(-max_deflection - y_margin, max_deflection + y_margin)
+        # 
+        # x_max = distance_m[-1] if len(distance_m) > 0 else 1
+        # self.peak_ax.set_xlim(0, x_max * 1.02)
+        # 
+        # n_channels = len(channel_data)
+        # info = f"Скорость: {speed_kmh} км/ч ({speed_cm_s:.1f} см/с) | Каналов: {n_channels} | Диапазон: {x_start:.1f}-{x_end:.1f} мс"
+        # self.peak_info_label.configure(text=info)
+        # 
+        # self.peak_fig.tight_layout()
+        # self.peak_canvas.draw()
+        # === КОНЕЦ СТАРОЙ РЕАЛИЗАЦИИ ===
+
         # Проверяем наличие данных
         if not self.loader.result_channels or self.loader.dynamics_time is None:
             messagebox.showinfo("Информация", "Сначала загрузите данные и выполните расчёт")
