@@ -1635,6 +1635,9 @@ class DinamikaApp:
         distance_positions = []
         range_data = []  # Для хранения данных диапазона вокруг пика
         
+        # Получаем информацию о плато из калибровочных данных
+        calib_info = getattr(self.loader, '_per_layer_calib_info', {})
+        
         for ch_name, ch_data in self.loader.result_channels_raw.items():
             if ch_name not in baselines:
                 continue
@@ -1658,10 +1661,46 @@ class DinamikaApp:
             peak_idx_local = np.argmax(ch_in_range)
             peak_distance = distance_in_range[peak_idx_local]
             
-            # Берем диапазон вокруг пика (±10 точек или меньше, если не хватает данных)
-            window_size = 10
-            start_idx = max(0, peak_idx_local - window_size)
-            end_idx = min(len(ch_in_range), peak_idx_local + window_size + 1)
+            # Пытаемся получить значения плато из калибровочной информации
+            plateau1 = None
+            plateau2 = None
+            if ch_name in calib_info:
+                plateau1 = calib_info[ch_name].get('plateau1')
+                plateau2 = calib_info[ch_name].get('plateau2')
+            
+            # Если есть информация о плато, используем её для определения границ диапазона
+            # Ищем точки где сигнал возвращается к значениям близким к плато (условным нулям)
+            if plateau1 is not None and plateau2 is not None:
+                # Используем среднее значение плато как базовый уровень для этого слоя
+                baseline_level = (plateau1 + plateau2) / 2
+                
+                # Находим порог для обнаружения начала/конца сигнала (5% от пика относительно базового уровня)
+                threshold = baseline_level + (max_in_range - baseline_level) * 0.05
+                
+                # Находим левую границу - где сигнал начинает расти от plateau1
+                # Идем от пика влево и ищем первую точку где сигнал <= threshold
+                left_idx = 0
+                for i in range(peak_idx_local, -1, -1):
+                    if ch_in_range[i] <= threshold:
+                        left_idx = i
+                        break
+                
+                # Находим правую границу - где сигнал возвращается к plateau2
+                # Идем от пика вправо и ищем первую точку где сигнал <= threshold
+                right_idx = len(ch_in_range) - 1
+                for i in range(peak_idx_local, len(ch_in_range)):
+                    if ch_in_range[i] <= threshold:
+                        right_idx = i
+                        break
+                
+                # Берем диапазон между найденными границами
+                start_idx = max(0, left_idx)
+                end_idx = min(len(ch_in_range), right_idx + 1)
+            else:
+                # Фоллбэк: используем данные всего выбранного диапазона времени
+                # Это даст максимально полный профиль параболы
+                start_idx = 0
+                end_idx = len(ch_in_range)
             
             range_distances = distance_in_range[start_idx:end_idx]
             range_values = ch_in_range[start_idx:end_idx]
@@ -1676,7 +1715,9 @@ class DinamikaApp:
                 'min': min_in_range,
                 'max': max_in_range,
                 'mean': float(np.mean(ch_in_range)),
-                'std': float(np.std(ch_in_range))
+                'std': float(np.std(ch_in_range)),
+                'start_idx': start_idx,
+                'end_idx': end_idx
             })
 
         zero_mode = "вручную" if self.loader.manual_zero_point is not None else "авто"
@@ -1736,15 +1777,15 @@ class DinamikaApp:
                 norm_distances = range_distances - dist_pos  # Центрируем относительно пика
                 
                 # Рисуем кривую диапазона значений: по оси X - расстояние (м), по оси Y - перемещение (мм)
-                self.peak_ax.plot(norm_distances, range_values, color='#059669', linewidth=1.5, alpha=0.8, 
+                self.peak_ax.plot(norm_distances, range_values, color='#059669', linewidth=2, alpha=0.9, 
                                  label=name if i == 0 else "", zorder=4)
                 
-                # Заполняем область под кривой
-                self.peak_ax.fill_between(norm_distances, range_values, alpha=0.15, color='#059669', zorder=3)
+                # Заполняем область под кривой для создания эффекта параболы
+                self.peak_ax.fill_between(norm_distances, range_values, alpha=0.2, color='#059669', zorder=3)
             
             # Рисуем точку пика
-            self.peak_ax.plot(0, peak_val, 'o', color='#dc2626', markersize=8,
-                              markeredgecolor='white', markeredgewidth=2, zorder=5,
+            self.peak_ax.plot(0, peak_val, 'o', color='#dc2626', markersize=10,
+                              markeredgecolor='white', markeredgewidth=2.5, zorder=5,
                               label=f"{name} (пик)" if i == 0 else "")
 
             delta_text = ""
