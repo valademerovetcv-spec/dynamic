@@ -1119,6 +1119,49 @@ class DinamikaApp:
             "auto_left": auto_left,
             "auto_right": auto_right,
         }
+        
+        # Добавляем привязку для обновления метки режима при изменении значений
+        def on_manual_change(*args):
+            self._update_calib_row_mode(layer_name)
+        
+        sensor_var.trace_add("write", on_manual_change)
+        left_var.trace_add("write", on_manual_change)
+        right_var.trace_add("write", on_manual_change)
+
+    def _update_calib_row_mode(self, layer_name):
+        """Обновление метки режима при ручном изменении значений."""
+        if layer_name not in self._calib_sel_widgets:
+            return
+        
+        widgets = self._calib_sel_widgets[layer_name]
+        auto_sensor = widgets["auto_sensor"]
+        auto_left = widgets["auto_left"]
+        auto_right = widgets["auto_right"]
+        
+        sensor = widgets["sensor_var"].get()
+        try:
+            left = float(widgets["left_var"].get().replace(",", "."))
+            right = float(widgets["right_var"].get().replace(",", "."))
+        except ValueError:
+            return
+        
+        mode_parts = []
+        if sensor != auto_sensor:
+            mode_parts.append("датчик")
+        if abs(left - auto_left) > 0.01 or abs(right - auto_right) > 0.01:
+            mode_parts.append("диапазон")
+        
+        mode_text = "вручную" if mode_parts else "авто"
+        
+        # Получаем magnet_x из данных калибровки
+        magnet_x = None
+        if layer_name in self.loader._per_layer_magnet_x:
+            magnet_x = self.loader._per_layer_magnet_x.get(layer_name)
+        mag_hint = f"  X={magnet_x:.1f}" if magnet_x is not None else ""
+        
+        widgets["auto_label"].configure(
+            text=f"{mode_text}\n↑ {auto_left:.1f}—{auto_right:.1f} мм{mag_hint}"
+        )
 
     def _apply_calib_selection(self):
         if not self._calib_sel_widgets:
