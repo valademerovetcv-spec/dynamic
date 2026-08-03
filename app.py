@@ -342,6 +342,15 @@ class DinamikaApp:
         self.peak_speed_cm_s_label = ttk.Label(speed_frame, text="(0.00 см/с)", style="Info.TLabel")
         self.peak_speed_cm_s_label.pack(side=tk.LEFT, padx=4)
         self._on_peak_speed_change(None)  # Инициализация перевода скорости
+        
+        # Поле ввода расстояния между осями
+        axle_dist_frame = ttk.Frame(peak_btn_frame)
+        axle_dist_frame.pack(side=tk.LEFT, padx=8)
+        ttk.Label(axle_dist_frame, text="Расст. между осями (м):", style="Info.TLabel").pack(side=tk.LEFT, padx=2)
+        self.peak_axle_dist_var = tk.StringVar(value="1.2")
+        self.peak_axle_dist_entry = ttk.Entry(axle_dist_frame, textvariable=self.peak_axle_dist_var, width=6, font=("Segoe UI", 9))
+        self.peak_axle_dist_entry.pack(side=tk.LEFT, padx=2)
+        self.peak_axle_dist_entry.bind("<KeyRelease>", self._on_peak_axle_dist_change)
 
         self.peak_select_btn = ttk.Button(peak_btn_frame, text="Выбрать диапазон",
                                            style="ToolbarCsv.TButton",
@@ -1549,6 +1558,11 @@ class DinamikaApp:
             self.peak_speed_cm_s_label.configure(text=f"({speed_cm_s:.2f} см/с)")
         except (ValueError, TypeError):
             self.peak_speed_cm_s_label.configure(text="(0.00 см/с)")
+    
+    def _on_peak_axle_dist_change(self, event):
+        """Обработка изменения расстояния между осями."""
+        # Просто сохраняем значение, используется при построении графика
+        pass
 
     # === Peak selection methods ===
 
