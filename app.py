@@ -349,6 +349,13 @@ class DinamikaApp:
         ttk.Button(speed_frame, text="Применить", style="ToolbarCsv.TButton",
                    command=self._on_peak_speed_changed).pack(side=tk.LEFT)
 
+        # Вкладки для различных участков между минимумами
+        self.peak_tabs_frame = ttk.Frame(peak_frame)
+        self.peak_tabs_frame.pack(side=tk.TOP, fill=tk.X, padx=4, pady=(4, 0))
+        self.peak_tab_buttons = []
+        self.peak_segments = []
+        self.peak_current_segment_idx = 0
+
         self.peak_fig = Figure(figsize=(5, 4), dpi=100)
         self.peak_ax = self.peak_fig.add_subplot(111)
         self.peak_canvas = FigureCanvasTkAgg(self.peak_fig, master=peak_frame)
@@ -1599,12 +1606,20 @@ class DinamikaApp:
             self._calculate_and_draw_peaks(*self._peak_range)
     
     def _auto_detect_and_draw_peaks(self):
-        """Автоматическое обнаружение и отрисовка пиковых значений на основе локальных нулей."""
+        """Автоматическое обнаружение и отрисовка пиковых значений на основе локальных нулей.
+        Находит все участки между локальными минимумами (плато) и создает вкладки для каждого."""
         if not self.loader.result_channels_raw or self.loader.dynamics_time is None:
             return
         
         time = self.loader.dynamics_time
         calib_info = getattr(self.loader, '_per_layer_calib_info', {})
+        
+        # Очищаем старые сегменты и вкладки
+        self.peak_segments = []
+        for btn in self.peak_tab_buttons:
+            btn.destroy()
+        self.peak_tab_buttons = []
+        self.peak_current_segment_idx = 0
         
         # Находим первый канал с данными калибровки
         first_ch_name = None
@@ -1619,53 +1634,94 @@ class DinamikaApp:
                 x_start = float(np.min(time))
                 x_end = float(np.max(time))
                 self._peak_range = (x_start, x_end)
+                self.peak_segments = [{'start': x_start, 'end': x_end}]
+                self._create_peak_tabs()
                 self._calculate_and_draw_peaks(x_start, x_end)
             return
         
-        # Получаем значения плато для определения границ между локальными нулями
-        plateau1 = calib_info[first_ch_name].get('plateau1')
-        plateau2 = calib_info[first_ch_name].get('plateau2')
+        # Получаем данные первого канала для поиска всех участков между минимумами
+        ch_data = self.loader.result_channels_raw[first_ch_name]
         
-        if plateau1 is None or plateau2 is None:
-            # Если нет информации о плато, используем весь диапазон
+        # Находим глобальный минимум и максимум для оценки уровня "нуля"
+        global_min = np.min(ch_data)
+        global_max = np.max(ch_data)
+        range_val = global_max - global_min
+        
+        # Уровень "плато" (локального нуля) - низкие значения (15% от диапазона)
+        plateau_level = global_min + 0.15 * range_val
+        
+        # Ищем индексы, где значение ниже уровня плато
+        is_plateau = ch_data <= plateau_level
+        plateau_indices = np.where(is_plateau)[0]
+        
+        if len(plateau_indices) < 2:
+            # Если не нашли явных плато, берем весь диапазон
             if len(time) > 0:
                 x_start = float(np.min(time))
                 x_end = float(np.max(time))
                 self._peak_range = (x_start, x_end)
+                self.peak_segments = [{'start': x_start, 'end': x_end}]
+                self._create_peak_tabs()
                 self._calculate_and_draw_peaks(x_start, x_end)
             return
         
-        # Базовый уровень - среднее между плато
-        baseline_level = (plateau1 + plateau2) / 2
+        # Группируем индексы плато в кластеры (минимумы)
+        clusters = []
+        current_cluster = [plateau_indices[0]]
+        for i in range(1, len(plateau_indices)):
+            if plateau_indices[i] == plateau_indices[i-1] + 1:
+                current_cluster.append(plateau_indices[i])
+            else:
+                clusters.append(current_cluster)
+                current_cluster = [plateau_indices[i]]
+        clusters.append(current_cluster)
         
-        # Получаем данные первого канала для поиска границ
-        ch_data = self.loader.result_channels_raw[first_ch_name]
+        # Формируем сегменты между кластерами плато (участки между минимумами)
+        valid_segments = []
+        for i in range(len(clusters) - 1):
+            end_current_min = clusters[i][-1]
+            start_next_min = clusters[i+1][0]
+            
+            if start_next_min > end_current_min + 5:  # Минимальная длина сегмента
+                seg_start = float(time[end_current_min])
+                seg_end = float(time[start_next_min])
+                valid_segments.append({
+                    'start': seg_start,
+                    'end': seg_end,
+                    'min_left_idx': end_current_min,
+                    'min_right_idx': start_next_min
+                })
         
-        # Находим порог для обнаружения начала/конца сигнала (5% от пика относительно базового уровня)
-        max_val = float(np.max(ch_data))
-        threshold = baseline_level + abs(max_val - baseline_level) * 0.05
-        
-        # Находим левую границу - где сигнал начинает расти от plateau1
-        left_idx = 0
-        for i in range(len(ch_data)):
-            if ch_data[i] > threshold:
-                left_idx = max(0, i - 1)
-                break
-        
-        # Находим правую границу - где сигнал возвращается к plateau2
-        right_idx = len(ch_data) - 1
-        for i in range(len(ch_data) - 1, -1, -1):
-            if ch_data[i] > threshold:
-                right_idx = min(len(ch_data) - 1, i + 1)
-                break
-        
-        # Преобразуем индексы во время
-        x_start = float(time[left_idx])
-        x_end = float(time[right_idx])
-        
-        self._peak_range = (x_start, x_end)
-        self.status_var.set(f"Авто-диапазон: {x_start:.1f} — {x_end:.1f} мс")
-        self._calculate_and_draw_peaks(x_start, x_end)
+        if len(valid_segments) > 0:
+            self.peak_segments = valid_segments
+            self._peak_range = (valid_segments[0]['start'], valid_segments[0]['end'])
+            self._create_peak_tabs()
+            self._calculate_and_draw_peaks(valid_segments[0]['start'], valid_segments[0]['end'])
+        else:
+            # Если не нашли валидных сегментов, берем весь диапазон
+            if len(time) > 0:
+                x_start = float(np.min(time))
+                x_end = float(np.max(time))
+                self._peak_range = (x_start, x_end)
+                self.peak_segments = [{'start': x_start, 'end': x_end}]
+                self._create_peak_tabs()
+                self._calculate_and_draw_peaks(x_start, x_end)
+    
+    def _create_peak_tabs(self):
+        """Создает кнопки-вкладки для каждого найденного сегмента."""
+        for i, seg in enumerate(self.peak_segments):
+            btn_text = f"Участок {i+1}"
+            btn = ttk.Button(self.peak_tabs_frame, text=btn_text, style="ToolbarCsv.TButton",
+                            command=lambda idx=i: self._on_peak_tab_click(idx))
+            btn.pack(side=tk.LEFT, padx=2, pady=2)
+            self.peak_tab_buttons.append(btn)
+    
+    def _on_peak_tab_click(self, idx):
+        """Обработка клика по вкладке сегмента."""
+        self.peak_current_segment_idx = idx
+        segment = self.peak_segments[idx]
+        self._peak_range = (segment['start'], segment['end'])
+        self._calculate_and_draw_peaks(segment['start'], segment['end'])
 
     def _calculate_and_draw_peaks(self, x_start, x_end):
         if not self.loader.result_channels_raw or self.loader.dynamics_time is None:
