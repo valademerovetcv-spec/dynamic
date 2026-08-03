@@ -331,6 +331,18 @@ class DinamikaApp:
         peak_btn_frame = ttk.Frame(peak_frame)
         peak_btn_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=(0, 4))
 
+        # Поле ввода скорости автомобиля
+        speed_frame = ttk.Frame(peak_btn_frame)
+        speed_frame.pack(side=tk.LEFT, padx=8)
+        ttk.Label(speed_frame, text="Скорость (км/ч):", style="Info.TLabel").pack(side=tk.LEFT, padx=2)
+        self.peak_speed_var = tk.StringVar(value="60")
+        self.peak_speed_entry = ttk.Entry(speed_frame, textvariable=self.peak_speed_var, width=8, font=("Segoe UI", 9))
+        self.peak_speed_entry.pack(side=tk.LEFT, padx=2)
+        self.peak_speed_entry.bind("<KeyRelease>", self._on_peak_speed_change)
+        self.peak_speed_cm_s_label = ttk.Label(speed_frame, text="(0.00 см/с)", style="Info.TLabel")
+        self.peak_speed_cm_s_label.pack(side=tk.LEFT, padx=4)
+        self._on_peak_speed_change(None)  # Инициализация перевода скорости
+
         self.peak_select_btn = ttk.Button(peak_btn_frame, text="Выбрать диапазон",
                                            style="ToolbarCsv.TButton",
                                            command=self._start_peak_selection)
@@ -349,6 +361,10 @@ class DinamikaApp:
         self._peak_selection_rect = None
         self._peak_press_id = None
         self._peak_release_id = None
+        
+        # Закомментированная старая реализация
+        # Старый график строил отклонения по горизонтали для каждого канала
+        # Теперь строим прогиб от пройденного расстояния
 
     def _build_temp_tab(self, parent):
         self._temp_file_path = None
@@ -1520,6 +1536,15 @@ class DinamikaApp:
     def _on_result_leave(self, event):
         self.result_canvas.get_tk_widget().delete("crosshair")
 
+    def _on_peak_speed_change(self, event):
+        """Обработка изменения скорости автомобиля - перевод км/ч в см/с."""
+        try:
+            speed_kmh = float(self.peak_speed_var.get())
+            speed_cm_s = speed_kmh * 100000 / 3600  # км/ч -> см/с
+            self.peak_speed_cm_s_label.configure(text=f"({speed_cm_s:.2f} см/с)")
+        except (ValueError, TypeError):
+            self.peak_speed_cm_s_label.configure(text="(0.00 см/с)")
+
     # === Peak selection methods ===
 
     def _apply_manual_zero(self):
@@ -1581,115 +1606,198 @@ class DinamikaApp:
         self.status_var.set(f"Диапазон: {x_start:.1f} — {x_end:.1f} мс")
 
     def _calculate_and_draw_peaks(self, x_start, x_end):
+        """
+        Построение графика пиковых значений.
+        По оси Y - прогиб (мм), по оси X - пройденное расстояние (м).
+        Данные фильтруются между "Полками" (диапазон тарировки).
+        """
         if not self.loader.result_channels or self.loader.dynamics_time is None:
             return
-        baselines = self.loader.channel_baselines or self.loader.channel_mins
-        if self.loader.zero_point is None or baselines is None:
+        
+        # Получаем скорость автомобиля
+        try:
+            speed_kmh = float(self.peak_speed_var.get())
+            speed_cm_s = speed_kmh * 100000 / 3600  # км/ч -> см/с
+        except (ValueError, TypeError):
+            speed_cm_s = 0.0
+        
+        if speed_cm_s <= 0:
+            messagebox.showwarning("Предупреждение", "Скорость автомобиля должна быть больше 0")
             return
-
+        
         time = self.loader.dynamics_time
-        mask = (time >= x_start) & (time <= x_end)
         zero_point = self.loader.zero_point
-        DEVIATION_THRESHOLD = 0.0001  # mm
-
-        names = []
-        deviations = []
-        peak_values = []
+        baselines = self.loader.channel_baselines or self.loader.channel_mins
+        
+        if zero_point is None or baselines is None:
+            return
+        
+        # Маска выбранного диапазона времени
+        mask = (time >= x_start) & (time <= x_end)
+        
+        if not any(mask):
+            self.peak_ax.clear()
+            self.peak_ax.set_title("Профиль пиков")
+            self.peak_ax.text(0.5, 0.5, "Нет данных в выбранном диапазоне",
+                              ha="center", va="center", transform=self.peak_ax.transAxes,
+                              fontsize=11, color="#94a3b8", style="italic")
+            self.peak_ax.set_axis_off()
+            self.peak_fig.tight_layout()
+            self.peak_canvas.draw()
+            return
+        
+        # Преобразуем время в пройденное расстояние (в метрах)
+        # distance = speed * time, где speed в см/с, time в мс
+        # 1 см/с * 1 мс = 0.01 м/с * 0.001 с = 0.00001 м = 0.01 мм
+        time_ms = time[mask]
+        time_start = time_ms[0] if len(time_ms) > 0 else 0
+        time_relative = time_ms - time_start  # относительное время от начала диапазона (мс)
+        distance_m = (speed_cm_s / 100) * (time_relative / 1000)  # см/с * с = см, затем /100 = м
+        
+        # Собираем данные для всех каналов
+        channel_data = {}
         for ch_name, ch_data in self.loader.result_channels.items():
             if ch_name not in baselines:
                 continue
             ch_in_range = ch_data[mask]
             if len(ch_in_range) == 0:
                 continue
+            
+            # Центрируем данные относительно baseline (нуля)
             baseline = baselines[ch_name]
-            # Для центрированных данных deviation считается от нуля (т.к. данные уже центрированы)
-            max_in_range = float(np.max(ch_in_range))
-            deviation = max_in_range  # Данные уже центрированы относительно своего baseline
-            if deviation < DEVIATION_THRESHOLD:
-                continue
-            names.append(ch_name)
-            deviations.append(deviation)
-            peak_values.append(max_in_range)
-
-        zero_mode = "вручную" if self.loader.manual_zero_point is not None else "авто"
-        auto_zero = self.loader.auto_zero_point
-        auto_text = f" (авто: {auto_zero:.3f})" if auto_zero is not None and zero_mode == "вручную" else ""
-
-        if not names:
+            centered_data = ch_in_range - baseline
+            channel_data[ch_name] = centered_data
+        
+        if not channel_data:
             self.peak_ax.clear()
             self.peak_ax.set_title("Профиль пиков")
-            self.peak_ax.text(0.5, 0.5, "Значимых отклонений\nне обнаружено",
+            self.peak_ax.text(0.5, 0.5, "Нет данных каналов для отображения",
                               ha="center", va="center", transform=self.peak_ax.transAxes,
                               fontsize=11, color="#94a3b8", style="italic")
             self.peak_ax.set_axis_off()
-            self.peak_info_label.configure(
-                text=f"Ноль ({zero_mode}): {zero_point:.3f} мм{auto_text} | Порог: {DEVIATION_THRESHOLD} мм")
             self.peak_fig.tight_layout()
             self.peak_canvas.draw()
             return
-
-        deltas = [abs(peak_values[i] - peak_values[i - 1]) for i in range(1, len(peak_values))]
-
-        # Draw peak chart
+        
+        # Строим график для каждого канала
         self.peak_ax.clear()
-        self.peak_ax.set_title("Профиль пиков — Прогиб")
-
-        n = len(names)
-        max_dev = max(deviations)
-
-        y_zero = 0.0
-        self.peak_ax.axhline(y=y_zero, color='#94a3b8', linestyle='-', alpha=0.4, linewidth=2, zorder=1)
-        self.peak_ax.text(0, y_zero + 0.15, f"Ноль: {zero_point:.3f} мм ({zero_mode})",
-                          fontsize=8, color='#64748b', ha='center', va='bottom')
-
-        for i, (name, dev, peak_val) in enumerate(zip(names, deviations, peak_values)):
-            y_point = -(i + 1) * 0.8
-            t = np.linspace(0, 1, 100)
-            y_curve = y_point + (y_zero - y_point) * t
-            x_right = dev * np.sqrt(t)
-            x_left = -dev * np.sqrt(t)
-
-            self.peak_ax.fill_betweenx(y_curve, x_left, x_right,
-                                        alpha=0.10, color='#2563eb', zorder=2)
-            self.peak_ax.plot(x_right, y_curve, color='#2563eb', linewidth=2.5, alpha=0.9, zorder=3)
-            self.peak_ax.plot(x_left, y_curve, color='#2563eb', linewidth=2.5, alpha=0.9, zorder=3)
-            self.peak_ax.plot(0, y_point, 'o', color='#dc2626', markersize=10,
-                              markeredgecolor='white', markeredgewidth=2, zorder=5)
-
-            delta_text = ""
-            if i > 0:
-                delta_text = f"  Δ={deltas[i - 1]:.3f} мм"
-            self.peak_ax.annotate(
-                f"  {name}: {dev:.3f} мм (пик {peak_val:.3f}){delta_text}",
-                xy=(0, y_point), xytext=(max_dev * 0.15, y_point),
-                fontsize=8, va='center', color='#1e293b',
-                bbox=dict(boxstyle='round,pad=0.2',
-                          facecolor='#fef3c7', edgecolor='#f59e0b',
-                          alpha=0.9), zorder=4)
-
-            if i > 0:
-                y_prev = -(i) * 0.8
-                y_mid = (y_point + y_prev) / 2
-                self.peak_ax.annotate(
-                    '', xy=(max_dev * 0.55, y_prev), xytext=(max_dev * 0.55, y_point),
-                    arrowprops=dict(arrowstyle='<->', color='#059669', lw=1.5),
-                    zorder=4)
-                self.peak_ax.text(max_dev * 0.62, y_mid,
-                                  f"Δ {deltas[i - 1]:.3f} мм",
-                                  fontsize=7, color='#059669', va='center', fontweight='bold')
-
-        self.peak_ax.set_xlim(-max_dev * 1.3, max_dev * 1.8)
-        self.peak_ax.set_xlabel("Отклонение от нуля, мм")
-        self.peak_ax.grid(True, axis='x', alpha=0.2)
-
-        delta_parts = [f"{d:.3f} мм" for d in deltas]
-        delta_str = " | Δ: " + ", ".join(delta_parts) if delta_parts else ""
-        info = (f"Ноль ({zero_mode}): {zero_point:.3f} мм{auto_text} | "
-                f"Порог: {DEVIATION_THRESHOLD} мм | Каналов: {n}{delta_str}")
+        self.peak_ax.set_title(f"Профиль пиков — Прогиб (скорость {speed_kmh} км/ч = {speed_cm_s:.1f} см/с)")
+        
+        colors = ["#4CAF50", "#2196F3", "#FF9800", "#E91E63", "#9C27B0", "#00BCD4", "#FF5722"]
+        
+        max_deflection = 0
+        for i, (ch_name, centered_data) in enumerate(channel_data.items()):
+            color = colors[i % len(colors)]
+            
+            # Находим максимальный прогиб
+            max_defl = float(np.max(np.abs(centered_data)))
+            max_deflection = max(max_deflection, max_defl)
+            
+            # Строим график прогиба от расстояния
+            self.peak_ax.plot(distance_m, centered_data, color=color, linewidth=2, 
+                             label=ch_name, alpha=0.8)
+        
+        # Добавляем линию нуля
+        self.peak_ax.axhline(y=0, color='#94a3b8', linestyle='--', alpha=0.5, linewidth=1.5)
+        
+        # Настройка осей и легенды
+        self.peak_ax.set_xlabel("Пройденное расстояние, м")
+        self.peak_ax.set_ylabel("Прогиб, мм")
+        self.peak_ax.grid(True, alpha=0.3)
+        self.peak_ax.legend(loc='best', fontsize=8)
+        
+        # Установка границ осей
+        if max_deflection > 0:
+            y_margin = max_deflection * 0.1
+            self.peak_ax.set_ylim(-max_deflection - y_margin, max_deflection + y_margin)
+        
+        x_max = distance_m[-1] if len(distance_m) > 0 else 1
+        self.peak_ax.set_xlim(0, x_max * 1.02)
+        
+        # Обновляем информационную метку
+        n_channels = len(channel_data)
+        info = f"Скорость: {speed_kmh} км/ч ({speed_cm_s:.1f} см/с) | Каналов: {n_channels} | Диапазон: {x_start:.1f}-{x_end:.1f} мс"
         self.peak_info_label.configure(text=info)
-
+        
         self.peak_fig.tight_layout()
         self.peak_canvas.draw()
+
+        # Старая реализация закомментирована
+        # if not names:
+        #     self.peak_ax.clear()
+        #     self.peak_ax.set_title("Профиль пиков")
+        #     self.peak_ax.text(0.5, 0.5, "Значимых отклонений\nне обнаружено",
+        #                       ha="center", va="center", transform=self.peak_ax.transAxes,
+        #                       fontsize=11, color="#94a3b8", style="italic")
+        #     self.peak_ax.set_axis_off()
+        #     self.peak_info_label.configure(
+        #         text=f"Ноль ({zero_mode}): {zero_point:.3f} мм{auto_text} | Порог: {DEVIATION_THRESHOLD} мм")
+        #     self.peak_fig.tight_layout()
+        #     self.peak_canvas.draw()
+        #     return
+        #
+        # deltas = [abs(peak_values[i] - peak_values[i - 1]) for i in range(1, len(peak_values))]
+        #
+        # # Draw peak chart
+        # self.peak_ax.clear()
+        # self.peak_ax.set_title("Профиль пиков — Прогиб")
+        #
+        # n = len(names)
+        # max_dev = max(deviations)
+        #
+        # y_zero = 0.0
+        # self.peak_ax.axhline(y=y_zero, color='#94a3b8', linestyle='-', alpha=0.4, linewidth=2, zorder=1)
+        # self.peak_ax.text(0, y_zero + 0.15, f"Ноль: {zero_point:.3f} мм ({zero_mode})",
+        #                   fontsize=8, color='#64748b', ha='center', va='bottom')
+        #
+        # for i, (name, dev, peak_val) in enumerate(zip(names, deviations, peak_values)):
+        #     y_point = -(i + 1) * 0.8
+        #     t = np.linspace(0, 1, 100)
+        #     y_curve = y_point + (y_zero - y_point) * t
+        #     x_right = dev * np.sqrt(t)
+        #     x_left = -dev * np.sqrt(t)
+        #
+        #     self.peak_ax.fill_betweenx(y_curve, x_left, x_right,
+        #                                 alpha=0.10, color='#2563eb', zorder=2)
+        #     self.peak_ax.plot(x_right, y_curve, color='#2563eb', linewidth=2.5, alpha=0.9, zorder=3)
+        #     self.peak_ax.plot(x_left, y_curve, color='#2563eb', linewidth=2.5, alpha=0.9, zorder=3)
+        #     self.peak_ax.plot(0, y_point, 'o', color='#dc2626', markersize=10,
+        #                       markeredgecolor='white', markeredgewidth=2, zorder=5)
+        #
+        #     delta_text = ""
+        #     if i > 0:
+        #         delta_text = f"  Δ={deltas[i - 1]:.3f} мм"
+        #     self.peak_ax.annotate(
+        #         f"  {name}: {dev:.3f} мм (пик {peak_val:.3f}){delta_text}",
+        #         xy=(0, y_point), xytext=(max_dev * 0.15, y_point),
+        #         fontsize=8, va='center', color='#1e293b',
+        #         bbox=dict(boxstyle='round,pad=0.2',
+        #                   facecolor='#fef3c7', edgecolor='#f59e0b',
+        #                   alpha=0.9), zorder=4)
+        #
+        #     if i > 0:
+        #         y_prev = -(i) * 0.8
+        #         y_mid = (y_point + y_prev) / 2
+        #         self.peak_ax.annotate(
+        #             '', xy=(max_dev * 0.55, y_prev), xytext=(max_dev * 0.55, y_point),
+        #             arrowprops=dict(arrowstyle='<->', color='#059669', lw=1.5),
+        #             zorder=4)
+        #         self.peak_ax.text(max_dev * 0.62, y_mid,
+        #                           f"Δ {deltas[i - 1]:.3f} мм",
+        #                           fontsize=7, color='#059669', va='center', fontweight='bold')
+        #
+        # self.peak_ax.set_xlim(-max_dev * 1.3, max_dev * 1.8)
+        # self.peak_ax.set_xlabel("Отклонение от нуля, мм")
+        # self.peak_ax.grid(True, axis='x', alpha=0.2)
+        #
+        # delta_parts = [f"{d:.3f} мм" for d in deltas]
+        # delta_str = " | Δ: " + ", ".join(delta_parts) if delta_parts else ""
+        # info = (f"Ноль ({zero_mode}): {zero_point:.3f} мм{auto_text} | "
+        #         f"Порог: {DEVIATION_THRESHOLD} мм | Каналов: {n}{delta_str}")
+        # self.peak_info_label.configure(text=info)
+        #
+        # self.peak_fig.tight_layout()
+        # self.peak_canvas.draw()
 
     def _clear_peak_chart(self):
         self.peak_ax.clear()
