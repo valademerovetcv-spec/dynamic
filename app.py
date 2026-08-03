@@ -1746,6 +1746,8 @@ class DinamikaApp:
         # === КОНЕЦ СТАРОЙ РЕАЛИЗАЦИИ ===
         
         # НОВАЯ РЕАЛИЗАЦИЯ: График для автомобиля с учётом количества осей
+        # Строится полный график прогиба со всеми промежуточными значениями
+        # Пики отмечаются красными крестиками и нумеруются
         if not self.loader.result_channels or self.loader.dynamics_time is None:
             messagebox.showinfo("Информация", "Сначала загрузите данные и выполните расчёт")
             return
@@ -1826,6 +1828,8 @@ class DinamikaApp:
         colors = ["#4CAF50", "#2196F3", "#FF9800", "#E91E63", "#9C27B0", "#00BCD4", "#FF5722"]
         
         max_deflection = 0
+        total_peaks = 0
+        
         for i, (ch_name, centered_data) in enumerate(channel_data.items()):
             color = colors[i % len(colors)]
             
@@ -1833,9 +1837,29 @@ class DinamikaApp:
             max_defl = float(np.max(np.abs(centered_data)))
             max_deflection = max(max_deflection, max_defl)
             
-            # Строим график прогиба от расстояния
+            # Строим график прогиба от расстояния (все промежуточные значения)
             self.peak_ax.plot(distance_m, centered_data, color=color, linewidth=2, 
                              label=ch_name, alpha=0.8)
+            
+            # Находим пики в этом канале
+            abs_data = np.abs(centered_data)
+            peaks = []
+            for j in range(1, len(abs_data) - 1):
+                if abs_data[j] > abs_data[j-1] and abs_data[j] > abs_data[j+1]:
+                    # Проверяем, что пик значимый (больше порога)
+                    if abs_data[j] > max_deflection * 0.3:  # порог 30% от максимума
+                        peaks.append(j)
+            
+            # Отмечаем пики красными крестиками и нумеруем
+            for peak_idx, j in enumerate(peaks):
+                x_dist = distance_m[j]
+                y_val = centered_data[j]
+                self.peak_ax.plot(x_dist, y_val, 'rx', markersize=10, markeredgewidth=2)
+                self.peak_ax.annotate(f'{peak_idx+1}', (x_dist, y_val), 
+                                     textcoords="offset points", xytext=(5, 5),
+                                     ha='left', fontsize=9, fontweight='bold', color='red')
+            
+            total_peaks = max(total_peaks, len(peaks))
         
         # Добавляем линию нуля
         self.peak_ax.axhline(y=0, color='#94a3b8', linestyle='--', alpha=0.5, linewidth=1.5)
@@ -1854,25 +1878,9 @@ class DinamikaApp:
         x_max = distance_m[-1] if len(distance_m) > 0 else 1
         self.peak_ax.set_xlim(0, x_max * 1.02)
         
-        # Определяем количество пиков (осей автомобиля) в выбранном диапазоне
-        # Пик - это локальный максимум абсолютного значения прогиба
-        n_axes = 0
-        for ch_name, centered_data in channel_data.items():
-            # Находим пики в данных канала
-            abs_data = np.abs(centered_data)
-            # Простой поиск пиков - точки где значение больше соседей
-            peaks = []
-            for j in range(1, len(abs_data) - 1):
-                if abs_data[j] > abs_data[j-1] and abs_data[j] > abs_data[j+1]:
-                    # Проверяем, что пик значимый (больше порога)
-                    if abs_data[j] > max_deflection * 0.3:  # порог 30% от максимума
-                        peaks.append(j)
-            if peaks:
-                n_axes = max(n_axes, len(peaks))
-        
         # Обновляем информационную метку
         n_channels = len(channel_data)
-        info = f"Скорость: {speed_kmh} км/ч ({speed_cm_s:.1f} см/с) | Каналов: {n_channels} | Осьей: {n_axes} | Диапазон: {x_start:.1f}-{x_end:.1f} мс"
+        info = f"Скорость: {speed_kmh} км/ч ({speed_cm_s:.1f} см/с) | Каналов: {n_channels} | Осьей: {total_peaks} | Диапазон: {x_start:.1f}-{x_end:.1f} мс"
         self.peak_info_label.configure(text=info)
         
         self.peak_fig.tight_layout()
