@@ -339,6 +339,16 @@ class DinamikaApp:
         self.peak_info_label = ttk.Label(peak_btn_frame, text="", style="Info.TLabel")
         self.peak_info_label.pack(side=tk.LEFT, padx=8)
 
+        # Speed input field
+        speed_frame = ttk.Frame(peak_btn_frame)
+        speed_frame.pack(side=tk.RIGHT, padx=8)
+        ttk.Label(speed_frame, text="Скорость (км/ч):", style="Info.TLabel").pack(side=tk.LEFT, padx=(0, 4))
+        self.peak_speed_var = tk.StringVar(value="60")
+        self.peak_speed_entry = ttk.Entry(speed_frame, textvariable=self.peak_speed_var, width=8)
+        self.peak_speed_entry.pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Button(speed_frame, text="Применить", style="ToolbarCsv.TButton",
+                   command=self._on_peak_speed_changed).pack(side=tk.LEFT)
+
         self.peak_fig = Figure(figsize=(5, 4), dpi=100)
         self.peak_ax = self.peak_fig.add_subplot(111)
         self.peak_canvas = FigureCanvasTkAgg(self.peak_fig, master=peak_frame)
@@ -1580,6 +1590,11 @@ class DinamikaApp:
         self._peak_range = (x_start, x_end)
         self.status_var.set(f"Диапазон: {x_start:.1f} — {x_end:.1f} мс")
 
+    def _on_peak_speed_changed(self):
+        """Обработка изменения скорости автомобиля."""
+        if self._peak_range is not None:
+            self._calculate_and_draw_peaks(*self._peak_range)
+
     def _calculate_and_draw_peaks(self, x_start, x_end):
         if not self.loader.result_channels or self.loader.dynamics_time is None:
             return
@@ -1592,24 +1607,69 @@ class DinamikaApp:
         zero_point = self.loader.zero_point
         DEVIATION_THRESHOLD = 0.0001  # mm
 
+        # Получаем скорость из поля ввода (км/ч -> м/с)
+        try:
+            speed_kmh = float(self.peak_speed_var.get())
+            speed_ms = speed_kmh / 3.6  # Преобразование км/ч в м/с
+        except ValueError:
+            speed_ms = 60 / 3.6  # Значение по умолчанию 60 км/ч
+
+        # Определяем единицу времени (предполагаем мс, если не указано иное)
+        # Если время < 100, считаем что это секунды, иначе - миллисекунды
+        time_unit = "ms"
+        if len(time) > 1 and np.max(time) < 100:
+            time_unit = "s"
+        
+        # Рассчитываем шаг времени и координаты расстояния
+        if time_unit == "ms":
+            time_seconds = time / 1000.0  # Переводим мс в секунды
+        else:
+            time_seconds = time
+        
+        # Расстояние = скорость * время (в метрах)
+        distance = time_seconds * speed_ms
+
         names = []
         deviations = []
         peak_values = []
+        distance_positions = []
+        value_ranges = []  # Для хранения диапазона значений вокруг пика
+        
         for ch_name, ch_data in self.loader.result_channels.items():
             if ch_name not in baselines:
                 continue
             ch_in_range = ch_data[mask]
+            time_in_range = time[mask]
+            distance_in_range = distance[mask]
+            
             if len(ch_in_range) == 0:
                 continue
+            
             baseline = baselines[ch_name]
             # Для центрированных данных deviation считается от нуля (т.к. данные уже центрированы)
             max_in_range = float(np.max(ch_in_range))
+            min_in_range = float(np.min(ch_in_range))
             deviation = max_in_range  # Данные уже центрированы относительно своего baseline
+            
             if deviation < DEVIATION_THRESHOLD:
                 continue
+            
+            # Находим позицию пика (максимального значения)
+            peak_idx = np.argmax(ch_in_range)
+            peak_distance = distance_in_range[peak_idx]
+            
             names.append(ch_name)
             deviations.append(deviation)
             peak_values.append(max_in_range)
+            distance_positions.append(peak_distance)
+            
+            # Сохраняем диапазон значений (мин, макс, среднее) для отображения
+            value_ranges.append({
+                'min': min_in_range,
+                'max': max_in_range,
+                'mean': float(np.mean(ch_in_range)),
+                'std': float(np.std(ch_in_range))
+            })
 
         zero_mode = "вручную" if self.loader.manual_zero_point is not None else "авто"
         auto_zero = self.loader.auto_zero_point
@@ -1623,27 +1683,37 @@ class DinamikaApp:
                               fontsize=11, color="#94a3b8", style="italic")
             self.peak_ax.set_axis_off()
             self.peak_info_label.configure(
-                text=f"Ноль ({zero_mode}): {zero_point:.3f} мм{auto_text} | Порог: {DEVIATION_THRESHOLD} мм")
+                text=f"Ноль ({zero_mode}): {zero_point:.3f} мм{auto_text} | Порог: {DEVIATION_THRESHOLD} мм | Скорость: {speed_kmh:.1f} км/ч")
             self.peak_fig.tight_layout()
             self.peak_canvas.draw()
             return
 
         deltas = [abs(peak_values[i] - peak_values[i - 1]) for i in range(1, len(peak_values))]
+        distance_deltas = [abs(distance_positions[i] - distance_positions[i - 1]) for i in range(1, len(distance_positions))]
 
         # Draw peak chart
         self.peak_ax.clear()
-        self.peak_ax.set_title("Профиль пиков — Прогиб")
+        self.peak_ax.set_title(f"Профиль пиков — Прогиб (скорость {speed_kmh:.1f} км/ч)")
 
         n = len(names)
         max_dev = max(deviations)
+        max_dist = max(distance_positions) if distance_positions else 1
 
         y_zero = 0.0
         self.peak_ax.axhline(y=y_zero, color='#94a3b8', linestyle='-', alpha=0.4, linewidth=2, zorder=1)
         self.peak_ax.text(0, y_zero + 0.15, f"Ноль: {zero_point:.3f} мм ({zero_mode})",
                           fontsize=8, color='#64748b', ha='center', va='bottom')
 
-        for i, (name, dev, peak_val) in enumerate(zip(names, deviations, peak_values)):
+        for i, (name, dev, peak_val, dist_pos, val_range) in enumerate(zip(names, deviations, peak_values, distance_positions, value_ranges)):
             y_point = -(i + 1) * 0.8
+            
+            # Отображаем диапазон значений как вертикальную полосу
+            range_min = val_range['min']
+            range_max = val_range['max']
+            range_mean = val_range['mean']
+            range_std = val_range['std']
+            
+            # Рисуем основную кривую профиля
             t = np.linspace(0, 1, 100)
             y_curve = y_point + (y_zero - y_point) * t
             x_right = dev * np.sqrt(t)
@@ -1653,16 +1723,30 @@ class DinamikaApp:
                                         alpha=0.10, color='#2563eb', zorder=2)
             self.peak_ax.plot(x_right, y_curve, color='#2563eb', linewidth=2.5, alpha=0.9, zorder=3)
             self.peak_ax.plot(x_left, y_curve, color='#2563eb', linewidth=2.5, alpha=0.9, zorder=3)
+            
+            # Рисуем точку пика
             self.peak_ax.plot(0, y_point, 'o', color='#dc2626', markersize=10,
                               markeredgecolor='white', markeredgewidth=2, zorder=5)
+            
+            # Рисуем диапазон значений как вертикальную линию с усиками
+            self.peak_ax.plot([0, 0], [y_point - 0.3, y_point + 0.3], 
+                             color='#059669', linewidth=2, alpha=0.7, zorder=4)
+            self.peak_ax.plot([-0.1, 0.1], [y_point - 0.3, y_point - 0.3], 
+                             color='#059669', linewidth=1, alpha=0.7, zorder=4)
+            self.peak_ax.plot([-0.1, 0.1], [y_point + 0.3, y_point + 0.3], 
+                             color='#059669', linewidth=1, alpha=0.7, zorder=4)
 
             delta_text = ""
             if i > 0:
                 delta_text = f"  Δ={deltas[i - 1]:.3f} мм"
+            dist_delta_text = ""
+            if i > 0:
+                dist_delta_text = f" | Δx={distance_deltas[i - 1]:.2f} м"
+            
             self.peak_ax.annotate(
-                f"  {name}: {dev:.3f} мм (пик {peak_val:.3f}){delta_text}",
+                f"  {name}: {dev:.3f} мм (пик {peak_val:.3f}){delta_text}\n  x={dist_pos:.2f} м [{range_min:.3f}..{range_max:.3f}] σ={range_std:.4f}{dist_delta_text}",
                 xy=(0, y_point), xytext=(max_dev * 0.15, y_point),
-                fontsize=8, va='center', color='#1e293b',
+                fontsize=7, va='center', color='#1e293b',
                 bbox=dict(boxstyle='round,pad=0.2',
                           facecolor='#fef3c7', edgecolor='#f59e0b',
                           alpha=0.9), zorder=4)
@@ -1685,7 +1769,7 @@ class DinamikaApp:
         delta_parts = [f"{d:.3f} мм" for d in deltas]
         delta_str = " | Δ: " + ", ".join(delta_parts) if delta_parts else ""
         info = (f"Ноль ({zero_mode}): {zero_point:.3f} мм{auto_text} | "
-                f"Порог: {DEVIATION_THRESHOLD} мм | Каналов: {n}{delta_str}")
+                f"Порог: {DEVIATION_THRESHOLD} мм | Скорость: {speed_kmh:.1f} км/ч | Каналов: {n}{delta_str}")
         self.peak_info_label.configure(text=info)
 
         self.peak_fig.tight_layout()
