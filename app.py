@@ -272,8 +272,6 @@ class DinamikaApp:
         calib_sel_btn_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=(0, 4))
         ttk.Button(calib_sel_btn_frame, text="Применить", style="ToolbarCsv.TButton",
                    command=self._apply_calib_selection).pack(side=tk.LEFT, padx=2)
-        ttk.Button(calib_sel_btn_frame, text="Выбрать диапазон", style="ToolbarCsv.TButton",
-                   command=self._start_calib_range_selection).pack(side=tk.LEFT, padx=2)
         ttk.Button(calib_sel_btn_frame, text="Сбросить вручную", style="ToolbarCsv.TButton",
                    command=self._reset_calib_manual).pack(side=tk.LEFT, padx=2)
         self.calib_sel_info_label = ttk.Label(calib_sel_btn_frame, text="", style="Info.TLabel")
@@ -826,6 +824,9 @@ class DinamikaApp:
             self.file_label.configure(text=f"Динамика: {self._dynamics_file_path.name}")
             self.status_var.set(f"Загружена динамика: {self._dynamics_file_path.name} ({n_ch} каналов)")
 
+            # Обновляем автоматические диапазоны для пиков после загрузки динамики
+            self._update_auto_peak_ranges()
+
             if self.loader.calib_data is not None:
                 self.calculate()
         except Exception as e:
@@ -918,6 +919,9 @@ class DinamikaApp:
             src_n = len(self.loader.source_data) if self.loader.source_data is not None else 0
             self.file_label.configure(text=f"Динамика: {self._dynamics_file_path.name}")
             self.status_var.set(f"Загружена динамика: {self._dynamics_file_path.name} ({n_ch} каналов)")
+
+            # Обновляем автоматические диапазоны для пиков после загрузки динамики
+            self._update_auto_peak_ranges()
 
             if self.loader.calib_data is not None:
                 self.calculate()
@@ -1436,6 +1440,9 @@ class DinamikaApp:
                 if self.loader.auto_zero_point is not None:
                     if self.loader.manual_zero_point is None:
                         pass  # Removed manual zero var usage
+
+                # Обновляем автоматические диапазоны для пиков после расчёта
+                self._update_auto_peak_ranges()
 
                 if self._peak_range is not None:
                     self._calculate_and_draw_peaks(*self._peak_range)

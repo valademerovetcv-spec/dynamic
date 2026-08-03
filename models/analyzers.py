@@ -296,7 +296,7 @@ class SignalAnalyzer:
         return crossings
 
     @staticmethod
-    def find_peak_ranges(time, values, baseline=0.0, min_gap_points=10):
+    def find_peak_ranges(time, values, baseline=0.0, min_gap_points=10, min_amplitude_fraction=0.15):
         """
         Определение диапазонов между точками пересечения с нулем.
         
@@ -305,25 +305,53 @@ class SignalAnalyzer:
             values: массив значений сигнала (центрированный)
             baseline: базовая линия (по умолчанию 0.0)
             min_gap_points: минимальное количество точек между пересечениями
+            min_amplitude_fraction: минимальная доля амплитуды от максимума для участка
             
         Returns:
             list: список кортежей (time_start, time_end, start_idx, end_idx)
         """
         crossings = SignalAnalyzer.find_zero_crossings(values, baseline)
         
+        # Центрируем данные
+        centered = np.asarray(values, dtype=float) - baseline
+        
         if len(crossings) < 2:
-            # Если меньше 2 пересечений, берем весь диапазон
-            if len(crossings) == 1:
-                return [(time[0], time[-1], 0, len(values) - 1)]
+            # Если меньше 2 пересечений, ищем участок с максимальной амплитудой
+            max_amp = np.max(np.abs(centered))
+            if max_amp > 0:
+                # Находим индекс максимального отклонения
+                max_idx = np.argmax(np.abs(centered))
+                # Ищем ближайшие пересечения с нулем или границы
+                left_idx = 0
+                for i in range(max_idx, -1, -1):
+                    if abs(centered[i]) < baseline * 0.01:
+                        left_idx = i
+                        break
+                right_idx = len(values) - 1
+                for i in range(max_idx, len(values)):
+                    if abs(centered[i]) < baseline * 0.01:
+                        right_idx = i
+                        break
+                return [(time[left_idx], time[right_idx], left_idx, right_idx)]
             return [(time[0], time[-1], 0, len(values) - 1)]
         
         ranges = []
+        global_max_amp = np.max(np.abs(centered))
+        
         for i in range(len(crossings) - 1):
             start_idx = crossings[i]
             end_idx = crossings[i + 1]
             
             # Проверяем минимальную длину диапазона
-            if end_idx - start_idx >= min_gap_points:
+            if end_idx - start_idx < min_gap_points:
+                continue
+            
+            # Проверяем амплитуду в диапазоне
+            segment = centered[start_idx:end_idx + 1]
+            segment_amp = np.max(np.abs(segment))
+            
+            # Отбираем только участки с значимой амплитудой
+            if segment_amp >= min_amplitude_fraction * global_max_amp:
                 ranges.append((time[start_idx], time[end_idx], start_idx, end_idx))
         
         # Если не нашли подходящих диапазонов, возвращаем весь диапазон
