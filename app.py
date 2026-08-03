@@ -501,7 +501,8 @@ class DinamikaApp:
         container.grid_columnconfigure(0, weight=1)
         return tree
 
-    def _populate_tree(self, tree, df):
+    def _populate_tree(self, tree, df, max_rows=500):
+        """Заполняет таблицу данными с ограничением количества строк для производительности."""
         tree.delete(*tree.get_children())
         if df is None or df.empty:
             return
@@ -510,12 +511,23 @@ class DinamikaApp:
         for c in cols:
             tree.heading(c, text=c)
             tree.column(c, width=130, minwidth=80, anchor=tk.CENTER)
-        for i, (_, row) in enumerate(df.iterrows()):
+        
+        # Ограничиваем количество строк для производительности
+        total_rows = len(df)
+        display_df = df if total_rows <= max_rows else df.head(max_rows)
+        
+        for i, (_, row) in enumerate(display_df.iterrows()):
             vals = [str(v) if pd.notna(v) else "" for v in row]
             tag = "even" if i % 2 == 0 else "odd"
             tree.insert("", tk.END, values=vals, tags=(tag,))
+        
         tree.tag_configure("even", background="#f8fafc")
         tree.tag_configure("odd", background="#ffffff")
+        
+        # Добавляем информацию о количестве скрытых строк
+        if total_rows > max_rows:
+            tree.insert("", tk.END, values=[f"... всего {total_rows} строк (показано {max_rows})"] + [""] * (len(cols) - 1), tags=("info",))
+            tree.tag_configure("info", background="#fef3c7", foreground="#92400e")
 
     def _populate_notebook_tabs(self, notebook, tabs_dict, channels, time_col):
         for t in tabs_dict.values():
@@ -1340,7 +1352,8 @@ class DinamikaApp:
         finally:
             self._calculating = False
 
-    def _draw_result_chart(self):
+    def _draw_result_chart(self, max_points=5000):
+        """Рисует график результатов с прореживанием данных для производительности."""
         self.result_ax.clear()
         self.result_ax.set_title("Перемещение от времени")
 
@@ -1352,7 +1365,15 @@ class DinamikaApp:
                     visible = self._result_vars[ch_name].get()
                 if visible:
                     color = CHANNEL_COLORS[i % len(CHANNEL_COLORS)]
-                    self.result_ax.plot(self.loader.dynamics_time, ch_data,
+                    # Прореживаем данные если их слишком много
+                    time_data = self.loader.dynamics_time
+                    plot_data = ch_data
+                    n_points = len(ch_data)
+                    if n_points > max_points:
+                        step = n_points // max_points
+                        time_data = time_data[::step]
+                        plot_data = ch_data[::step]
+                    self.result_ax.plot(time_data, plot_data,
                                         linewidth=0.8, color=color, label=ch_name)
                     visible_any = True
             if visible_any:
@@ -1360,9 +1381,16 @@ class DinamikaApp:
             self.result_ax.set_xlabel("Время, мсек")
             self.result_ax.set_ylabel("Перемещение, мм")
         elif self.loader.result_df is not None and not self.loader.result_df.empty:
-            self.result_ax.plot(self.loader.result_df["Время, мсек"],
-                                self.loader.result_df["Перемещение, мм"],
-                                linewidth=0.8, color="#2196F3")
+            time_col = self.loader.result_df["Время, мсек"].values
+            val_col = self.loader.result_df["Перемещение, мм"].values
+            n_points = len(time_col)
+            if n_points > max_points:
+                step = n_points // max_points
+                self.result_ax.plot(time_col[::step], val_col[::step],
+                                    linewidth=0.8, color="#2196F3")
+            else:
+                self.result_ax.plot(time_col, val_col,
+                                    linewidth=0.8, color="#2196F3")
             self.result_ax.set_xlabel("Время, мсек")
             self.result_ax.set_ylabel("Перемещение, мм")
         else:
@@ -1605,7 +1633,8 @@ class DinamikaApp:
         self.peak_fig.tight_layout()
         self.peak_canvas.draw()
 
-    def _draw_raw_chart(self):
+    def _draw_raw_chart(self, max_points=5000):
+        """Рисует график динамики с прореживанием данных для производительности."""
         self.raw_ax.clear()
         self.raw_ax.set_title("Динамика")
 
@@ -1617,7 +1646,15 @@ class DinamikaApp:
                     visible = self._channel_vars[ch_name].get()
                 if visible:
                     color = CHANNEL_COLORS[i % len(CHANNEL_COLORS)]
-                    self.raw_ax.plot(self.loader.dynamics_time, ch_data,
+                    # Прореживаем данные если их слишком много
+                    time_data = self.loader.dynamics_time
+                    plot_data = ch_data
+                    n_points = len(ch_data)
+                    if n_points > max_points:
+                        step = n_points // max_points
+                        time_data = time_data[::step]
+                        plot_data = ch_data[::step]
+                    self.raw_ax.plot(time_data, plot_data,
                                      linewidth=0.6, color=color, label=ch_name)
                     visible_any = True
             if visible_any:
@@ -1628,9 +1665,17 @@ class DinamikaApp:
             src_cols = list(self.loader.source_data.columns)
             src_time = src_cols[0]
             src_val = src_cols[1] if len(src_cols) > 1 else src_cols[0]
-            self.raw_ax.plot(self.loader.source_data[src_time],
-                             self.loader.source_data[src_val],
-                             linewidth=0.6, color="#4CAF50")
+            # Прореживаем данные если их слишком много
+            n_points = len(self.loader.source_data[src_time])
+            if n_points > max_points:
+                step = n_points // max_points
+                self.raw_ax.plot(self.loader.source_data[src_time].values[::step],
+                                 self.loader.source_data[src_val].values[::step],
+                                 linewidth=0.6, color="#4CAF50")
+            else:
+                self.raw_ax.plot(self.loader.source_data[src_time],
+                                 self.loader.source_data[src_val],
+                                 linewidth=0.6, color="#4CAF50")
             self.raw_ax.set_xlabel(src_time)
             self.raw_ax.set_ylabel(src_val)
         else:
@@ -1644,11 +1689,21 @@ class DinamikaApp:
 
         self._draw_disp_chart()
 
-    def _plot_calib_rising_curve(self, ax, disp, tug, color, label):
-        """Рисует тарировку: восходящий участок ярко, скат — бледно."""
+    def _plot_calib_rising_curve(self, ax, disp, tug, color, label, max_points=3000):
+        """Рисует тарировку: восходящий участок ярко, скат — бледно, с прореживанием."""
         disp = np.asarray(disp, dtype=float)
         tug = np.asarray(tug, dtype=float)
         min_idx, peak_idx = self.loader._find_rising_indices(tug)
+
+        # Прореживаем данные если их слишком много
+        n_points = len(disp)
+        if n_points > max_points:
+            step = n_points // max_points
+            disp = disp[::step]
+            tug = tug[::step]
+            # Пересчитываем индексы после прореживания
+            min_idx = min_idx // step
+            peak_idx = min(peak_idx // step, len(disp) - 1)
 
         if min_idx > 0:
             ax.plot(disp[:min_idx + 1], tug[:min_idx + 1],
@@ -1739,7 +1794,8 @@ class DinamikaApp:
         if draw_magnet:
             self._draw_magnet_chart()
 
-    def _draw_magnet_chart(self):
+    def _draw_magnet_chart(self, max_points=3000):
+        """Рисует график магнита с прореживанием данных для производительности."""
         self.magnet_ax.clear()
         self.magnet_ax.set_title("Положение магнита — тарировка")
 
@@ -1752,7 +1808,17 @@ class DinamikaApp:
                 for v in c["tug"].values():
                     all_tug_vals.append(v)
             all_tugs = np.concatenate(all_tug_vals)
-            self.magnet_ax.set_xlim(all_disp.min(), all_disp.max())
+            
+            # Прореживаем данные если их слишком много
+            n_points = len(all_disp)
+            step = 1
+            if n_points > max_points:
+                step = n_points // max_points
+            
+            disp_plot = all_disp[::step]
+            tugs_plot = [tv[::step] for tv in all_tug_vals]
+            
+            self.magnet_ax.set_xlim(disp_plot.min(), disp_plot.max())
             y_margin = (all_tugs.max() - all_tugs.min()) * 0.05
             self.magnet_ax.set_ylim(all_tugs.min() - y_margin, all_tugs.max() + y_margin)
 
@@ -1776,7 +1842,12 @@ class DinamikaApp:
                     alpha = 1.0 if is_sel else 0.55
                     suffix = " *" if is_sel else ""
                     label = f"{ch_name} — {tug_name}{suffix}"
-                    self.magnet_ax.plot(cal["disp"], tug_vals,
+                    
+                    # Прореживаем данные канала
+                    plot_disp = cal["disp"][::step]
+                    plot_tug = tug_vals[::step]
+                    
+                    self.magnet_ax.plot(plot_disp, plot_tug,
                                         linewidth=lw, color=color, alpha=alpha, label=label)
 
                     ix_info = layer_ix.get(tug_name, {})
