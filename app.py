@@ -1284,9 +1284,6 @@ class DinamikaApp:
             self.status_var.set("Настройки тарировки применены")
         except ValueError:
             messagebox.showerror("Ошибка", "Проверьте числовые значения диапазона (мм)")
-        
-        # После применения калибровки автоматически рассчитываем пиковые значения
-        self.root.after(100, self._auto_detect_and_draw_peaks)
 
     def _disconnect_calib_range_handlers(self):
         for attr in ('_calib_range_press_id', '_calib_range_release_id'):
@@ -1446,8 +1443,8 @@ class DinamikaApp:
                     if self.loader.manual_zero_point is None:
                         pass  # Removed manual zero var usage
 
-                if self._peak_range is not None:
-                    self._calculate_and_draw_peaks(*self._peak_range)
+                # После расчета автоматически находим и отображаем пики
+                self.root.after(100, self._auto_detect_and_draw_peaks)
 
                 n = len(self.loader.result_df)
                 mn = self.loader.result_df.iloc[:, 1].min()
@@ -1612,6 +1609,7 @@ class DinamikaApp:
             return
         
         time = self.loader.dynamics_time
+        baselines = self.loader.channel_baselines or self.loader.channel_mins
         calib_info = getattr(self.loader, '_per_layer_calib_info', {})
         
         # Очищаем старые сегменты и вкладки
@@ -1621,10 +1619,10 @@ class DinamikaApp:
         self.peak_tab_buttons = []
         self.peak_current_segment_idx = 0
         
-        # Находим первый канал с данными калибровки
+        # Находим первый канал с данными калибровки и baseline
         first_ch_name = None
         for ch_name in self.loader.result_channels_raw.keys():
-            if ch_name in calib_info:
+            if ch_name in calib_info and (baselines is None or ch_name in baselines):
                 first_ch_name = ch_name
                 break
         
@@ -1639,19 +1637,27 @@ class DinamikaApp:
                 self._calculate_and_draw_peaks(x_start, x_end)
             return
         
-        # Получаем данные первого канала для поиска всех участков между минимумами
-        ch_data = self.loader.result_channels_raw[first_ch_name]
+        # Получаем сырые данные перемещения первого канала
+        raw_ch_data = self.loader.result_channels_raw[first_ch_name]
         
-        # Находим глобальный минимум и максимум для оценки уровня "нуля"
-        global_min = np.min(ch_data)
-        global_max = np.max(ch_data)
+        # Если есть baseline, используем центрированные данные для поиска плато
+        if baselines and first_ch_name in baselines:
+            baseline = baselines[first_ch_name]
+            centered_ch_data = raw_ch_data - baseline
+        else:
+            centered_ch_data = raw_ch_data
+            baseline = np.min(raw_ch_data)
+        
+        # Находим глобальный минимум и максимум центрированных данных для оценки уровня "нуля"
+        global_min = np.min(centered_ch_data)
+        global_max = np.max(centered_ch_data)
         range_val = global_max - global_min
         
-        # Уровень "плато" (локального нуля) - низкие значения (15% от диапазона)
+        # Уровень "плато" (локального нуля) - низкие значения (15% от диапазона от минимума)
         plateau_level = global_min + 0.15 * range_val
         
-        # Ищем индексы, где значение ниже уровня плато
-        is_plateau = ch_data <= plateau_level
+        # Ищем индексы, где значение ниже уровня плато (это и есть локальные нули)
+        is_plateau = centered_ch_data <= plateau_level
         plateau_indices = np.where(is_plateau)[0]
         
         if len(plateau_indices) < 2:
@@ -1665,7 +1671,7 @@ class DinamikaApp:
                 self._calculate_and_draw_peaks(x_start, x_end)
             return
         
-        # Группируем индексы плато в кластеры (минимумы)
+        # Группируем индексы плато в кластеры (минимумы/локальные нули)
         clusters = []
         current_cluster = [plateau_indices[0]]
         for i in range(1, len(plateau_indices)):
@@ -1676,7 +1682,7 @@ class DinamikaApp:
                 current_cluster = [plateau_indices[i]]
         clusters.append(current_cluster)
         
-        # Формируем сегменты между кластерами плато (участки между минимумами)
+        # Формируем сегменты между кластерами плато (участки между локальными нулями)
         valid_segments = []
         for i in range(len(clusters) - 1):
             end_current_min = clusters[i][-1]
@@ -1689,7 +1695,8 @@ class DinamikaApp:
                     'start': seg_start,
                     'end': seg_end,
                     'min_left_idx': end_current_min,
-                    'min_right_idx': start_next_min
+                    'min_right_idx': start_next_min,
+                    'baseline': baseline
                 })
         
         if len(valid_segments) > 0:
@@ -1724,17 +1731,18 @@ class DinamikaApp:
         self._calculate_and_draw_peaks(segment['start'], segment['end'])
 
     def _calculate_and_draw_peaks(self, x_start, x_end):
+        """Расчет и отрисовка пиковых значений.
+        Использует сырые данные перемещения, приводит их к локальному нулю (baseline слоя),
+        а затем строит график относительно общего нуля."""
         if not self.loader.result_channels_raw or self.loader.dynamics_time is None:
             return
         baselines = self.loader.channel_baselines or self.loader.channel_mins
-        if self.loader.zero_point is None or baselines is None:
+        if baselines is None:
             return
 
         time = self.loader.dynamics_time
         mask = (time >= x_start) & (time <= x_end)
-        zero_point = self.loader.zero_point
-        DEVIATION_THRESHOLD = 0.0001  # mm
-
+        
         # Получаем скорость из поля ввода (км/ч -> м/с)
         try:
             speed_kmh = float(self.peak_speed_var.get())
@@ -1763,75 +1771,50 @@ class DinamikaApp:
         distance_positions = []
         range_data = []  # Для хранения данных диапазона вокруг пика
         
-        # Получаем информацию о плато из калибровочных данных
-        calib_info = getattr(self.loader, '_per_layer_calib_info', {})
-        
-        for ch_name, ch_data in self.loader.result_channels_raw.items():
+        # Находим общий ноль (минимум из всех baseline'ов) для приведения к общему нулю
+        common_zero = min(baselines.values()) if baselines else 0.0
+
+        for ch_name, raw_ch_data in self.loader.result_channels_raw.items():
             if ch_name not in baselines:
                 continue
-            ch_in_range = ch_data[mask]
+            
+            raw_in_range = raw_ch_data[mask]
             time_in_range = time[mask]
             distance_in_range = distance[mask]
             
-            if len(ch_in_range) == 0:
+            if len(raw_in_range) == 0:
                 continue
             
-            baseline = baselines[ch_name]
-            # Для центрированных данных deviation считается от нуля (т.к. данные уже центрированы)
-            max_in_range = float(np.max(ch_in_range))
-            min_in_range = float(np.min(ch_in_range))
-            deviation = max_in_range  # Данные уже центрированы относительно своего baseline
+            # Получаем baseline для этого слоя (локальный ноль)
+            layer_baseline = baselines[ch_name]
             
+            # Приводим к локальному нулю (центрируем данные слоя)
+            centered_in_range = raw_in_range - layer_baseline
+            
+            # Затем приводим к общему нулю (сдвиг относительно общего минимума)
+            # Это нужно для правильного отображения на графике
+            zero_point_offset = layer_baseline - common_zero
+            final_values = centered_in_range  # Уже центрированы относительно своего baseline
+            
+            max_in_range = float(np.max(final_values))
+            min_in_range = float(np.min(final_values))
+            deviation = max_in_range  # Отклонение от локального нуля
+            
+            DEVIATION_THRESHOLD = 0.0001  # mm
             if deviation < DEVIATION_THRESHOLD:
                 continue
             
             # Находим позицию пика (максимального значения)
-            peak_idx_local = np.argmax(ch_in_range)
+            peak_idx_local = np.argmax(final_values)
             peak_distance = distance_in_range[peak_idx_local]
             
-            # Пытаемся получить значения плато из калибровочной информации
-            plateau1 = None
-            plateau2 = None
-            if ch_name in calib_info:
-                plateau1 = calib_info[ch_name].get('plateau1')
-                plateau2 = calib_info[ch_name].get('plateau2')
-            
-            # Если есть информация о плато, используем её для определения границ диапазона
-            # Ищем точки где сигнал возвращается к значениям близким к плато (условным нулям)
-            if plateau1 is not None and plateau2 is not None:
-                # Используем среднее значение плато как базовый уровень для этого слоя
-                baseline_level = (plateau1 + plateau2) / 2
-                
-                # Находим порог для обнаружения начала/конца сигнала (5% от пика относительно базового уровня)
-                threshold = baseline_level + (max_in_range - baseline_level) * 0.05
-                
-                # Находим левую границу - где сигнал начинает расти от plateau1
-                # Идем от пика влево и ищем первую точку где сигнал <= threshold
-                left_idx = 0
-                for i in range(peak_idx_local, -1, -1):
-                    if ch_in_range[i] <= threshold:
-                        left_idx = i
-                        break
-                
-                # Находим правую границу - где сигнал возвращается к plateau2
-                # Идем от пика вправо и ищем первую точку где сигнал <= threshold
-                right_idx = len(ch_in_range) - 1
-                for i in range(peak_idx_local, len(ch_in_range)):
-                    if ch_in_range[i] <= threshold:
-                        right_idx = i
-                        break
-                
-                # Берем диапазон между найденными границами
-                start_idx = max(0, left_idx)
-                end_idx = min(len(ch_in_range), right_idx + 1)
-            else:
-                # Фоллбэк: используем данные всего выбранного диапазона времени
-                # Это даст максимально полный профиль параболы
-                start_idx = 0
-                end_idx = len(ch_in_range)
+            # Используем весь диапазон в пределах выбранных x_start/x_end
+            # Это даст полный параболический профиль между локальными нулями
+            start_idx = 0
+            end_idx = len(final_values)
             
             range_distances = distance_in_range[start_idx:end_idx]
-            range_values = ch_in_range[start_idx:end_idx]
+            range_values = final_values[start_idx:end_idx]
             
             names.append(ch_name)
             deviations.append(deviation)
@@ -1842,8 +1825,8 @@ class DinamikaApp:
                 'values': range_values,
                 'min': min_in_range,
                 'max': max_in_range,
-                'mean': float(np.mean(ch_in_range)),
-                'std': float(np.std(ch_in_range)),
+                'mean': float(np.mean(final_values)),
+                'std': float(np.std(final_values)),
                 'start_idx': start_idx,
                 'end_idx': end_idx
             })
@@ -1860,7 +1843,7 @@ class DinamikaApp:
                               fontsize=11, color="#94a3b8", style="italic")
             self.peak_ax.set_axis_off()
             self.peak_info_label.configure(
-                text=f"Ноль ({zero_mode}): {zero_point:.3f} мм{auto_text} | Порог: {DEVIATION_THRESHOLD} мм | Скорость: {speed_kmh:.1f} км/ч")
+                text=f"Ноль ({zero_mode}): {common_zero:.3f} мм{auto_text} | Порог: {DEVIATION_THRESHOLD} мм | Скорость: {speed_kmh:.1f} км/ч")
             self.peak_fig.tight_layout()
             self.peak_canvas.draw()
             return
@@ -1884,10 +1867,10 @@ class DinamikaApp:
         y_min = min_peak_val - y_margin
         y_max = max_peak_val + y_margin
 
-        # Рисуем нулевую линию
+        # Рисуем нулевую линию (общий ноль)
         y_zero = 0.0
         self.peak_ax.axhline(y=y_zero, color='#94a3b8', linestyle='-', alpha=0.4, linewidth=2, zorder=1)
-        self.peak_ax.text(0, y_zero + 0.15, f"Ноль: {zero_point:.3f} мм ({zero_mode})",
+        self.peak_ax.text(0, y_zero + 0.15, f"Ноль: {common_zero:.3f} мм ({zero_mode})",
                           fontsize=8, color='#64748b', ha='center', va='bottom')
 
         for i, (name, dev, peak_val, dist_pos, r_data) in enumerate(zip(names, deviations, peak_values, distance_positions, range_data)):
