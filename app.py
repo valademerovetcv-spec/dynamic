@@ -1277,6 +1277,9 @@ class DinamikaApp:
             self.status_var.set("Настройки тарировки применены")
         except ValueError:
             messagebox.showerror("Ошибка", "Проверьте числовые значения диапазона (мм)")
+        
+        # После применения калибровки автоматически рассчитываем пиковые значения
+        self.root.after(100, self._auto_detect_and_draw_peaks)
 
     def _disconnect_calib_range_handlers(self):
         for attr in ('_calib_range_press_id', '_calib_range_release_id'):
@@ -1594,6 +1597,75 @@ class DinamikaApp:
         """Обработка изменения скорости автомобиля."""
         if self._peak_range is not None:
             self._calculate_and_draw_peaks(*self._peak_range)
+    
+    def _auto_detect_and_draw_peaks(self):
+        """Автоматическое обнаружение и отрисовка пиковых значений на основе локальных нулей."""
+        if not self.loader.result_channels_raw or self.loader.dynamics_time is None:
+            return
+        
+        time = self.loader.dynamics_time
+        calib_info = getattr(self.loader, '_per_layer_calib_info', {})
+        
+        # Находим первый канал с данными калибровки
+        first_ch_name = None
+        for ch_name in self.loader.result_channels_raw.keys():
+            if ch_name in calib_info:
+                first_ch_name = ch_name
+                break
+        
+        if first_ch_name is None:
+            # Если нет информации о плато, используем весь диапазон данных
+            if len(time) > 0:
+                x_start = float(np.min(time))
+                x_end = float(np.max(time))
+                self._peak_range = (x_start, x_end)
+                self._calculate_and_draw_peaks(x_start, x_end)
+            return
+        
+        # Получаем значения плато для определения границ между локальными нулями
+        plateau1 = calib_info[first_ch_name].get('plateau1')
+        plateau2 = calib_info[first_ch_name].get('plateau2')
+        
+        if plateau1 is None or plateau2 is None:
+            # Если нет информации о плато, используем весь диапазон
+            if len(time) > 0:
+                x_start = float(np.min(time))
+                x_end = float(np.max(time))
+                self._peak_range = (x_start, x_end)
+                self._calculate_and_draw_peaks(x_start, x_end)
+            return
+        
+        # Базовый уровень - среднее между плато
+        baseline_level = (plateau1 + plateau2) / 2
+        
+        # Получаем данные первого канала для поиска границ
+        ch_data = self.loader.result_channels_raw[first_ch_name]
+        
+        # Находим порог для обнаружения начала/конца сигнала (5% от пика относительно базового уровня)
+        max_val = float(np.max(ch_data))
+        threshold = baseline_level + abs(max_val - baseline_level) * 0.05
+        
+        # Находим левую границу - где сигнал начинает расти от plateau1
+        left_idx = 0
+        for i in range(len(ch_data)):
+            if ch_data[i] > threshold:
+                left_idx = max(0, i - 1)
+                break
+        
+        # Находим правую границу - где сигнал возвращается к plateau2
+        right_idx = len(ch_data) - 1
+        for i in range(len(ch_data) - 1, -1, -1):
+            if ch_data[i] > threshold:
+                right_idx = min(len(ch_data) - 1, i + 1)
+                break
+        
+        # Преобразуем индексы во время
+        x_start = float(time[left_idx])
+        x_end = float(time[right_idx])
+        
+        self._peak_range = (x_start, x_end)
+        self.status_var.set(f"Авто-диапазон: {x_start:.1f} — {x_end:.1f} мс")
+        self._calculate_and_draw_peaks(x_start, x_end)
 
     def _calculate_and_draw_peaks(self, x_start, x_end):
         if not self.loader.result_channels_raw or self.loader.dynamics_time is None:
