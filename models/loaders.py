@@ -11,54 +11,61 @@ class ExcelLoader:
     
     def load_excel(self, path):
         """Загрузка данных из Excel файла (основной формат)."""
-        wb = openpyxl.load_workbook(path, data_only=True)
-        ws = wb.active
-
-        max_col = ws.max_column or 25
-        row1 = [ws.cell(row=1, column=c).value for c in range(1, max_col + 1)]
-        row2 = [ws.cell(row=2, column=c).value for c in range(1, max_col + 1)]
-
+        # Быстрая загрузка через pandas - читаем весь файл сразу
+        df = pd.read_excel(path, header=None, engine='openpyxl')
+        
+        if len(df) < 2:
+            return self._load_excel_legacy(path)
+        
+        # Получаем заголовки из первых двух строк
+        row1 = df.iloc[0].tolist()
+        row2 = df.iloc[1].tolist()
+        
+        max_col = len(row1)
+        
+        # Находим секции
         cal_section = None
         for c, name in enumerate(row2):
             if name and "Перемещение" in str(name):
                 cal_section = c
                 break
-
+        
         res_section = None
         for c, val in enumerate(row1):
             if val == "Динамика в мм":
                 res_section = c
                 break
-
+        
         if cal_section is None:
-            wb.close()
             return self._load_excel_legacy(path)
-
+        
         dyn_section = 0
-
-        time_col = []
-        for row in ws.iter_rows(min_row=3, max_row=ws.max_row,
-                                min_col=dyn_section + 1, max_col=dyn_section + 1,
-                                values_only=True):
-            if row[0] is not None:
-                time_col.append(row[0])
+        
+        # Извлекаем все данные одним вызовом values - это быстрее
+        data_values = df.iloc[2:].values
+        
+        # Время (первый столбец)
+        time_raw = data_values[:, dyn_section]
+        time_mask = ~pd.isna(time_raw)
+        time_col = time_raw[time_mask].astype(float)
         n_time = len(time_col)
-
+        
+        # Каналы динамики (между dyn_section и cal_section)
         dyn_channels = {}
-        for c in range(dyn_section + 2, cal_section + 1):
-            ch_name = ws.cell(row=2, column=c).value
+        for c in range(dyn_section + 1, cal_section):
+            ch_name = row2[c] if c < len(row2) else None
             if not ch_name:
                 continue
-            vals = []
-            for row in ws.iter_rows(min_row=3, max_row=ws.max_row,
-                                    min_col=c, max_col=c, values_only=True):
-                if row[0] is not None:
-                    vals.append(float(row[0]))
-            n = min(n_time, len(vals))
-            if n > 0 and not all(v == 0 for v in vals[:n]):
-                dyn_channels[ch_name] = np.array(vals[:n])
-
-        self.dynamics_time = np.array(time_col[:n_time]) if n_time > 0 else None
+            ch_raw = data_values[:, c]
+            ch_mask = ~pd.isna(ch_raw)
+            ch_vals = ch_raw[ch_mask].astype(float)
+            n = min(n_time, len(ch_vals))
+            if n > 0:
+                arr = ch_vals[:n]
+                if not np.all(arr == 0):
+                    dyn_channels[ch_name] = arr
+        
+        self.dynamics_time = time_col if n_time > 0 else None
         self.dynamics_channels = dyn_channels if dyn_channels else None
 
         if self.dynamics_time is not None and self.dynamics_channels:
@@ -72,67 +79,66 @@ class ExcelLoader:
         else:
             self.source_data = None
 
-        cal_disp = []
-        for row in ws.iter_rows(min_row=3, max_row=ws.max_row,
-                                min_col=cal_section + 1, max_col=cal_section + 1,
-                                values_only=True):
-            if row[0] is not None:
-                cal_disp.append(float(row[0]))
-        nc = len(cal_disp)
-        cal_disp_name = ws.cell(row=2, column=cal_section + 1).value or "Перемещение, мм"
-
-        end_cal = res_section if res_section else max_col
-        cal_channels = {}
-        for c in range(cal_section + 2, end_cal + 1):
-            ch_name = ws.cell(row=2, column=c).value
-            if not ch_name:
-                continue
-            ch_vals = []
-            for row in ws.iter_rows(min_row=3, max_row=ws.max_row,
-                                    min_col=c, max_col=c, values_only=True):
-                if row[0] is not None:
-                    ch_vals.append(float(row[0]))
-            n = min(nc, len(ch_vals))
-            if n > 0 and not all(v == 0 for v in ch_vals[:n]):
-                cal_channels[ch_name] = np.round(np.array(ch_vals[:n]), 3)
-
-        self.calib_disp = np.array(cal_disp[:nc]) if nc > 0 else None
-        self.calib_channels = cal_channels if cal_channels else None
-
-        if self.calib_disp is not None and self.calib_channels:
-            first_key = list(self.calib_channels.keys())[0]
-            self.calib_data = pd.DataFrame({
-                cal_disp_name: self.calib_disp,
-                first_key: self.calib_channels[first_key]
-            })
-        elif nc > 0:
-            self.calib_data = pd.DataFrame({cal_disp_name: self.calib_disp})
-        else:
-            self.calib_data = None
-
-        if res_section is not None:
-            res_time = []
-            for row in ws.iter_rows(min_row=3, max_row=ws.max_row,
-                                    min_col=res_section + 1, max_col=res_section + 1,
-                                    values_only=True):
-                if row[0] is not None:
-                    res_time.append(row[0])
-            nr = len(res_time)
-
-            self.result_channels = {}
-            for c in range(res_section + 2, max_col + 1):
-                ch_name = ws.cell(row=2, column=c).value
+        # Калибровочные данные
+        if cal_section + 1 < max_col:
+            cal_disp_raw = data_values[:, cal_section]
+            cal_disp_mask = ~pd.isna(cal_disp_raw)
+            cal_disp = cal_disp_raw[cal_disp_mask].astype(float)
+            nc = len(cal_disp)
+            cal_disp_name = row2[cal_section + 1] if cal_section + 1 < len(row2) else "Перемещение, мм"
+            
+            end_cal = res_section if res_section else max_col
+            cal_channels = {}
+            for c in range(cal_section + 1, min(end_cal, max_col)):
+                ch_name = row2[c] if c < len(row2) else None
                 if not ch_name:
                     continue
-                ch_vals = []
-                for row in ws.iter_rows(min_row=3, max_row=ws.max_row,
-                                        min_col=c, max_col=c, values_only=True):
-                    if row[0] is not None:
-                        ch_vals.append(float(row[0]))
+                ch_raw = data_values[:, c]
+                ch_mask = ~pd.isna(ch_raw)
+                ch_vals = ch_raw[ch_mask].astype(float)
+                n = min(nc, len(ch_vals))
+                if n > 0:
+                    arr = np.round(ch_vals[:n], 3)
+                    if not np.all(arr == 0):
+                        cal_channels[ch_name] = arr
+            
+            self.calib_disp = cal_disp[:nc] if nc > 0 else None
+            self.calib_channels = cal_channels if cal_channels else None
+            
+            if self.calib_disp is not None and self.calib_channels:
+                first_key = list(self.calib_channels.keys())[0]
+                self.calib_data = pd.DataFrame({
+                    cal_disp_name: self.calib_disp,
+                    first_key: self.calib_channels[first_key]
+                })
+            elif nc > 0:
+                self.calib_data = pd.DataFrame({cal_disp_name: self.calib_disp})
+            else:
+                self.calib_data = None
+        else:
+            self.calib_disp = None
+            self.calib_channels = None
+            self.calib_data = None
+        
+        # Результаты если есть
+        if res_section is not None and res_section + 1 < max_col:
+            res_raw = data_values[:, res_section]
+            res_mask = ~pd.isna(res_raw)
+            res_time = res_raw[res_mask].astype(float)
+            nr = len(res_time)
+            
+            self.result_channels = {}
+            for c in range(res_section + 1, max_col):
+                ch_name = row2[c] if c < len(row2) else None
+                if not ch_name:
+                    continue
+                ch_raw = data_values[:, c]
+                ch_mask = ~pd.isna(ch_raw)
+                ch_vals = ch_raw[ch_mask].astype(float)
                 n = min(nr, len(ch_vals))
                 if n > 0:
-                    self.result_channels[ch_name] = np.round(np.array(ch_vals[:n]), 3)
-
+                    self.result_channels[ch_name] = np.round(ch_vals[:n], 3)
+            
             if nr > 0:
                 first_key = list(self.result_channels.keys())[0] if self.result_channels else None
                 self.result_df = pd.DataFrame({
@@ -145,8 +151,7 @@ class ExcelLoader:
         else:
             self.result_df = None
             self.result_channels = {}
-
-        wb.close()
+        
         return self.source_data, self.calib_data
 
     def _load_excel_legacy(self, path):
