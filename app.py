@@ -1745,9 +1745,10 @@ class DinamikaApp:
         # self.peak_canvas.draw()
         # === КОНЕЦ СТАРОЙ РЕАЛИЗАЦИИ ===
         
-        # НОВАЯ РЕАЛИЗАЦИЯ: График для автомобиля с учётом количества осей
+        # === НОВАЯ РЕАЛИЗАЦИЯ: График "Чаша прогиба" с нормализацией к локальному и общему нулю ===
         # Строится полный график прогиба со всеми промежуточными значениями
         # Пики отмечаются красными крестиками и нумеруются
+        # Данные приводятся к локальному нулю (среднее на полках) и общему нулю (относительно первого канала)
         if not self.loader.result_channels or self.loader.dynamics_time is None:
             messagebox.showinfo("Информация", "Сначала загрузите данные и выполните расчёт")
             return
@@ -1770,8 +1771,8 @@ class DinamikaApp:
             messagebox.showinfo("Информация", "Данные тарировки не загружены")
             return
         
-        # Получаем значения "Полок" тарировки (минимум и максимум диапазона)
-        # Используем первый канал для определения диапазона "Полок"
+        # Получаем значения "Полок" тарировки для каждого канала
+        # Для нормализации к локальному нулю используем среднее значение на полках
         first_channel = list(baselines.keys())[0] if baselines else None
         if first_channel is None:
             return
@@ -1790,8 +1791,10 @@ class DinamikaApp:
             self.peak_canvas.draw()
             return
         
-        # Собираем данные для всех каналов в выбранном диапазоне
+        # Собираем данные для всех каналов в выбранном диапазоне с нормализацией
         channel_data = {}
+        channel_local_zeros = {}  # храним локальный ноль для каждого канала
+        
         for ch_name, ch_data in self.loader.result_channels.items():
             if ch_name not in baselines:
                 continue
@@ -1799,10 +1802,12 @@ class DinamikaApp:
             if len(ch_in_range) == 0:
                 continue
             
-            # Центрируем данные относительно baseline (нуля)
+            # Нормализация к локальному нулю: вычитаем базовое значение (полку)
             baseline = baselines[ch_name]
-            centered_data = ch_in_range - baseline
-            channel_data[ch_name] = centered_data
+            localized_data = ch_in_range - baseline
+            channel_local_zeros[ch_name] = 0.0  # после вычитания базelines локальный ноль = 0
+            
+            channel_data[ch_name] = localized_data
         
         if not channel_data:
             self.peak_ax.clear()
@@ -1815,6 +1820,21 @@ class DinamikaApp:
             self.peak_canvas.draw()
             return
         
+        # Нормализация к общему нулю: сдвигаем все каналы относительно первого канала
+        # Первый канал принимаем за базовый уровень (общий ноль)
+        first_ch_name = list(channel_data.keys())[0]
+        first_channel_mean = np.mean(channel_data[first_ch_name])
+        
+        global_zero_offset = first_channel_mean
+        
+        # Применяем сдвиг к общему нулю для всех каналов
+        normalized_channel_data = {}
+        for ch_name, data in channel_data.items():
+            # Вычитаем общий ноль, чтобы первый канал был центрирован вокруг 0
+            # Остальные каналы будут показывать относительный прогиб
+            normalized_data = data - global_zero_offset
+            normalized_channel_data[ch_name] = normalized_data
+        
         # Преобразуем время в пройденное расстояние (в метрах)
         time_ms = time[mask]
         time_start = time_ms[0]
@@ -1823,26 +1843,27 @@ class DinamikaApp:
         
         # Строим график для каждого канала
         self.peak_ax.clear()
-        self.peak_ax.set_title(f"Профиль пиков автомобиля (скорость {speed_kmh} км/ч = {speed_cm_s:.1f} см/с)")
+        self.peak_ax.set_title(f"Чаша прогиба (скорость {speed_kmh} км/ч = {speed_cm_s:.1f} см/с)")
         
         colors = ["#4CAF50", "#2196F3", "#FF9800", "#E91E63", "#9C27B0", "#00BCD4", "#FF5722"]
         
         max_deflection = 0
         total_peaks = 0
         
-        for i, (ch_name, centered_data) in enumerate(channel_data.items()):
+        for i, (ch_name, normalized_data) in enumerate(normalized_channel_data.items()):
             color = colors[i % len(colors)]
             
-            # Находим максимальный прогиб
-            max_defl = float(np.max(np.abs(centered_data)))
+            # Находим максимальный прогиб (абсолютное значение минимума, т.к. прогиб отрицательный)
+            max_defl = float(np.max(np.abs(normalized_data)))
             max_deflection = max(max_deflection, max_defl)
             
-            # Строим график прогиба от расстояния (все промежуточные значения)
-            self.peak_ax.plot(distance_m, centered_data, color=color, linewidth=2, 
+            # Строим график прогиба от расстояния (все промежуточные значения) - "Чаша прогиба"
+            self.peak_ax.plot(distance_m, normalized_data, color=color, linewidth=2, 
                              label=ch_name, alpha=0.8)
             
-            # Находим пики в этом канале
-            abs_data = np.abs(centered_data)
+            # Находим пики в этом канале (максимальный прогиб)
+            # Для чаши прогиба пики - это минимумы (отрицательные значения)
+            abs_data = np.abs(normalized_data)
             peaks = []
             for j in range(1, len(abs_data) - 1):
                 if abs_data[j] > abs_data[j-1] and abs_data[j] > abs_data[j+1]:
@@ -1853,7 +1874,7 @@ class DinamikaApp:
             # Отмечаем пики красными крестиками и нумеруем
             for peak_idx, j in enumerate(peaks):
                 x_dist = distance_m[j]
-                y_val = centered_data[j]
+                y_val = normalized_data[j]
                 self.peak_ax.plot(x_dist, y_val, 'rx', markersize=10, markeredgewidth=2)
                 self.peak_ax.annotate(f'{peak_idx+1}', (x_dist, y_val), 
                                      textcoords="offset points", xytext=(5, 5),
@@ -1879,7 +1900,7 @@ class DinamikaApp:
         self.peak_ax.set_xlim(0, x_max * 1.02)
         
         # Обновляем информационную метку
-        n_channels = len(channel_data)
+        n_channels = len(normalized_channel_data)
         info = f"Скорость: {speed_kmh} км/ч ({speed_cm_s:.1f} см/с) | Каналов: {n_channels} | Осьей: {total_peaks} | Диапазон: {x_start:.1f}-{x_end:.1f} мс"
         self.peak_info_label.configure(text=info)
         
