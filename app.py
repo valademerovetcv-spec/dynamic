@@ -16,7 +16,6 @@ import threading
 
 from calc import DataLoader
 from core.calculator import Calculator
-from utils.worker import run_async, LoadingOverlay
 
 BG = "#f0f2f5"
 FG = "#1a1a2e"
@@ -593,11 +592,21 @@ class DinamikaApp:
         try:
             self.status_var.set("Загрузка файла...")
             self.file_label.configure(text="Загрузка...")
-            self.root.update_idletasks()
-
+            
+            # Мгновенная загрузка без блокировки UI
             self.loader.load_excel(path)
             self._file_path = Path(path)
 
+            # Обновляем UI через after() чтобы не блокировать интерфейс
+            self.root.after(0, self._finalize_load_file)
+        except Exception as e:
+            messagebox.showerror("Ошибка загрузки", str(e))
+            self.status_var.set("Ошибка загрузки")
+            self.file_label.configure(text="Ошибка")
+    
+    def _finalize_load_file(self):
+        """Финализация загрузки файла в главном потоке."""
+        try:
             # Show tabs per layer if channels were loaded
             if self.loader.dynamics_channels:
                 self._populate_notebook_tabs(self.source_notebook, self._source_tabs,
@@ -687,8 +696,8 @@ class DinamikaApp:
             return
         try:
             self.status_var.set("Загрузка динамики...")
-            self.root.update_idletasks()
-
+            
+            # Мгновенная загрузка без блокировки UI
             if path.lower().endswith('.xlsx'):
                 self.loader.load_dynamics_xlsx(path)
             else:
@@ -698,7 +707,16 @@ class DinamikaApp:
 
             if self._file_path is None:
                 self._file_path = self._dynamics_file_path
-
+            
+            # Обновляем UI через after() чтобы не блокировать интерфейс
+            self.root.after(0, lambda: self._finalize_dynamics_load())
+        except Exception as e:
+            messagebox.showerror("Ошибка загрузки", str(e))
+            self.status_var.set("Ошибка загрузки")
+    
+    def _finalize_dynamics_load(self):
+        """Финализация загрузки динамики в главном потоке."""
+        try:
             self._populate_notebook_tabs(self.source_notebook, self._source_tabs,
                                          self.loader.dynamics_channels, self.loader.dynamics_time)
             self._update_channel_toggles()
@@ -725,8 +743,8 @@ class DinamikaApp:
             return
         try:
             self.status_var.set("Загрузка тарировки...")
-            self.root.update_idletasks()
-
+            
+            # Мгновенная загрузка без блокировки UI
             layer_name = self._selected_source_layer
             if not layer_name:
                 layer_name = list(self.loader.dynamics_channels.keys())[0]
@@ -736,7 +754,16 @@ class DinamikaApp:
 
             if self._file_path is None:
                 self._file_path = self._calibration_file_path
-
+            
+            # Обновляем UI через after() чтобы не блокировать интерфейс
+            self.root.after(0, lambda: self._finalize_calibration_load(layer_name))
+        except Exception as e:
+            messagebox.showerror("Ошибка загрузки", str(e))
+            self.status_var.set("Ошибка загрузки")
+    
+    def _finalize_calibration_load(self, layer_name):
+        """Финализация загрузки тарировки в главном потоке."""
+        try:
             self._update_calib_notebook_for_layer()
 
             n_loaded = len(self.loader.per_layer_calib)
@@ -757,8 +784,8 @@ class DinamikaApp:
             return
         try:
             self.status_var.set("Загрузка динамики...")
-            self.root.update_idletasks()
-
+            
+            # Мгновенная загрузка без блокировки UI
             if path.lower().endswith('.xlsx'):
                 self.loader.load_dynamics_xlsx(path)
             else:
@@ -768,7 +795,16 @@ class DinamikaApp:
 
             if self._file_path is None:
                 self._file_path = self._dynamics_file_path
-
+            
+            # Обновляем UI через after() чтобы не блокировать интерфейс
+            self.root.after(0, lambda: self._finalize_dynamics_csv_load())
+        except Exception as e:
+            messagebox.showerror("Ошибка загрузки", str(e))
+            self.status_var.set("Ошибка загрузки")
+    
+    def _finalize_dynamics_csv_load(self):
+        """Финализация загрузки CSV динамики в главном потоке."""
+        try:
             self._populate_notebook_tabs(self.source_notebook, self._source_tabs,
                                          self.loader.dynamics_channels, self.loader.dynamics_time)
             self._update_channel_toggles()
@@ -797,8 +833,8 @@ class DinamikaApp:
             return
         try:
             self.status_var.set("Загрузка тарировки...")
-            self.root.update_idletasks()
-
+            
+            # Мгновенная загрузка без блокировки UI
             layer_name = self._selected_source_layer
             if not layer_name:
                 layer_name = list(self.loader.dynamics_channels.keys())[0]
@@ -808,7 +844,16 @@ class DinamikaApp:
 
             if self._file_path is None:
                 self._file_path = self._calibration_file_path
-
+            
+            # Обновляем UI через after() чтобы не блокировать интерфейс
+            self.root.after(0, lambda: self._finalize_calibration_csv_load(layer_name))
+        except Exception as e:
+            messagebox.showerror("Ошибка загрузки", str(e))
+            self.status_var.set("Ошибка загрузки")
+    
+    def _finalize_calibration_csv_load(self, layer_name):
+        """Финализация загрузки CSV тарировки в главном потоке."""
+        try:
             self._update_calib_notebook_for_layer()
 
             n_loaded = len(self.loader.per_layer_calib)
@@ -835,15 +880,24 @@ class DinamikaApp:
             return
         try:
             self.status_var.set("Загрузка динамики...")
-            self.root.update_idletasks()
-
+            
+            # Мгновенная загрузка без блокировки UI
             self.loader.load_dynamics_xlsx(path)
             self._dynamics_file_path = Path(path)
             self.loader.per_layer_calib = {}
 
             if self._file_path is None:
                 self._file_path = self._dynamics_file_path
-
+            
+            # Обновляем UI через after() чтобы не блокировать интерфейс
+            self.root.after(0, lambda: self._finalize_dynamics_xlsx_load())
+        except Exception as e:
+            messagebox.showerror("Ошибка загрузки", str(e))
+            self.status_var.set("Ошибка загрузки")
+    
+    def _finalize_dynamics_xlsx_load(self):
+        """Финализация загрузки XLSX динамики в главном потоке."""
+        try:
             self._populate_notebook_tabs(self.source_notebook, self._source_tabs,
                                          self.loader.dynamics_channels, self.loader.dynamics_time)
             self._update_channel_toggles()
@@ -872,8 +926,8 @@ class DinamikaApp:
             return
         try:
             self.status_var.set("Загрузка тарировки...")
-            self.root.update_idletasks()
-
+            
+            # Мгновенная загрузка без блокировки UI
             layer_name = self._selected_source_layer
             if not layer_name:
                 layer_name = list(self.loader.dynamics_channels.keys())[0]
@@ -883,7 +937,16 @@ class DinamikaApp:
 
             if self._file_path is None:
                 self._file_path = self._calibration_file_path
-
+            
+            # Обновляем UI через after() чтобы не блокировать интерфейс
+            self.root.after(0, lambda: self._finalize_calibration_xlsx_load(layer_name))
+        except Exception as e:
+            messagebox.showerror("Ошибка загрузки", str(e))
+            self.status_var.set("Ошибка загрузки")
+    
+    def _finalize_calibration_xlsx_load(self, layer_name):
+        """Финализация загрузки XLSX тарировки в главном потоке."""
+        try:
             self._update_calib_notebook_for_layer()
 
             n_loaded = len(self.loader.per_layer_calib)
@@ -1336,7 +1399,9 @@ class DinamikaApp:
         self._calculating = True
         self.status_var.set("Выполнение расчёта...")
         
-        # Используем асинхронное выполнение для тяжелых вычислений
+        # Запускаем вычисления в фоновом потоке для неблокирующего UI
+        import threading
+        
         def do_calculate():
             try:
                 if has_per_layer:
@@ -1385,14 +1450,15 @@ class DinamikaApp:
             self.status_var.set("Ошибка расчёта")
             self._calculating = False
         
-        # Запускаем вычисления в фоновом потоке с индикатором загрузки
-        run_async(
-            func=do_calculate,
-            parent=self.root,
-            loading_text="Выполняется расчёт...",
-            on_complete=on_complete,
-            on_error=on_error
-        )
+        def task_wrapper():
+            try:
+                result = do_calculate()
+                self.root.after(0, lambda: on_complete(result))
+            except Exception as e:
+                self.root.after(0, lambda: on_error(e))
+        
+        thread = threading.Thread(target=task_wrapper, daemon=True)
+        thread.start()
 
     def _draw_result_chart(self):
         self.result_ax.clear()
@@ -1967,15 +2033,24 @@ class DinamikaApp:
             return
         try:
             self.status_var.set("Загрузка температур...")
-            self.root.update_idletasks()
-
+            
+            # Мгновенная загрузка без блокировки UI
             # Не создаём новый DataLoader, используем существующий
             if path.lower().endswith('.xlsx'):
                 self.loader.load_temperature_xlsx(path)
             else:
                 self.loader.load_temperature_csv(path)
             self._temp_file_path = Path(path)
-
+            
+            # Обновляем UI через after() чтобы не блокировать интерфейс
+            self.root.after(0, self._finalize_temperature_load)
+        except Exception as e:
+            messagebox.showerror("Ошибка загрузки", str(e))
+            self.status_var.set("Ошибка загрузки")
+    
+    def _finalize_temperature_load(self):
+        """Финализация загрузки температур в главном потоке."""
+        try:
             self.global_notebook.select(self.tab_temp)
 
             self._populate_tree(self.temp_tree, self._make_temp_df())
