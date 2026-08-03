@@ -328,16 +328,26 @@ class DinamikaApp:
         peak_frame = ttk.LabelFrame(bot_paned, text=" Пиковые значения ")
         bot_paned.add(peak_frame, weight=2)
 
-        peak_btn_frame = ttk.Frame(peak_frame)
-        peak_btn_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=(0, 4))
+        # Создаем фрейм для кнопок и табов диапазонов
+        peak_top_frame = ttk.Frame(peak_frame)
+        peak_top_frame.pack(side=tk.TOP, fill=tk.X, padx=4, pady=(4, 0))
 
-        self.peak_select_btn = ttk.Button(peak_btn_frame, text="Выбрать диапазон",
+        # Фрейм для кнопок (теперь только сброс)
+        peak_btn_frame = ttk.Frame(peak_top_frame)
+        peak_btn_frame.pack(side=tk.LEFT, fill=tk.X)
+
+        self.peak_reset_btn = ttk.Button(peak_btn_frame, text="Сбросить диапазон",
                                            style="ToolbarCsv.TButton",
-                                           command=self._start_peak_selection)
-        self.peak_select_btn.pack(side=tk.LEFT, padx=2)
+                                           command=self._reset_peak_selection)
+        self.peak_reset_btn.pack(side=tk.LEFT, padx=2)
 
         self.peak_info_label = ttk.Label(peak_btn_frame, text="", style="Info.TLabel")
         self.peak_info_label.pack(side=tk.LEFT, padx=8)
+
+        # Notebook для вкладок диапазонов
+        self.peak_range_notebook = ttk.Notebook(peak_top_frame)
+        self.peak_range_notebook.pack(side=tk.RIGHT, fill=tk.X, expand=True)
+        self._peak_range_tabs = {}
 
         self.peak_fig = Figure(figsize=(5, 4), dpi=100)
         self.peak_ax = self.peak_fig.add_subplot(111)
@@ -349,6 +359,7 @@ class DinamikaApp:
         self._peak_selection_rect = None
         self._peak_press_id = None
         self._peak_release_id = None
+        self._auto_peak_ranges = []  # Список автоматически определенных диапазонов
 
     def _build_temp_tab(self, parent):
         self._temp_file_path = None
@@ -1528,6 +1539,111 @@ class DinamikaApp:
     def _reset_manual_zero(self):
         pass  # Removed - no longer used
 
+    def _reset_peak_selection(self):
+        """Сброс выбранного диапазона и возврат к автоматическому определению."""
+        if self._peak_selection_rect is not None:
+            self._peak_selection_rect.remove()
+            self._peak_selection_rect = None
+        self._disconnect_peak_handlers()
+        self._peak_selection_active = False
+        self._peak_range = None
+        # Пересчитываем пики с использованием автоматических диапазонов
+        self._update_auto_peak_ranges()
+        self.status_var.set("Диапазон сброшен")
+
+    def _disconnect_peak_handlers(self):
+        """Отключение обработчиков событий выделения диапазона."""
+        if self._peak_press_id is not None:
+            self.result_canvas.mpl_disconnect(self._peak_press_id)
+            self._peak_press_id = None
+        if self._peak_release_id is not None:
+            self.result_canvas.mpl_disconnect(self._peak_release_id)
+            self._peak_release_id = None
+
+    def _update_auto_peak_ranges(self):
+        """Автоматическое определение диапазонов между нулями и обновление вкладок."""
+        if not self.loader.result_channels or self.loader.dynamics_time is None:
+            return
+        
+        baselines = self.loader.channel_baselines or self.loader.channel_mins
+        if not baselines:
+            return
+        
+        time = self.loader.dynamics_time
+        
+        # Используем первый канал для определения диапазонов
+        first_ch_name = list(self.loader.result_channels.keys())[0]
+        first_ch_data = self.loader.result_channels[first_ch_name]
+        baseline = baselines.get(first_ch_name, 0.0)
+        
+        # Находим диапазоны между пересечениями с нулем
+        from models.analyzers import SignalAnalyzer
+        ranges = SignalAnalyzer.find_peak_ranges(time, first_ch_data, baseline)
+        
+        self._auto_peak_ranges = ranges
+        
+        # Обновляем вкладки
+        self._update_peak_range_tabs(ranges)
+        
+        # Если есть диапазоны, выбираем первый
+        if ranges:
+            x_start, x_end, _, _ = ranges[0]
+            self._calculate_and_draw_peaks(x_start, x_end)
+            self._peak_range = (x_start, x_end)
+
+    def _update_peak_range_tabs(self, ranges):
+        """Обновление вкладок для каждого диапазона."""
+        # Очищаем старые вкладки
+        for tab in list(self._peak_range_tabs.keys()):
+            self.peak_range_notebook.forget(tab)
+        self._peak_range_tabs.clear()
+        
+        if not ranges:
+            # Создаем вкладку по умолчанию
+            default_frame = ttk.Frame(self.peak_range_notebook)
+            self.peak_range_notebook.add(default_frame, text="  Нет данных  ")
+            lbl = ttk.Label(default_frame, text="Нет данных для отображения",
+                           background=PANEL_BG, foreground="#94a3b8",
+                           font=("Segoe UI", 10, "italic"))
+            lbl.pack(expand=True)
+            self._peak_range_tabs["Нет данных"] = default_frame
+            return
+        
+        # Создаем вкладки для каждого диапазона
+        for i, (x_start, x_end, start_idx, end_idx) in enumerate(ranges):
+            frame = ttk.Frame(self.peak_range_notebook)
+            tab_name = f"Участок {i + 1}"
+            self.peak_range_notebook.add(frame, text=f"  {tab_name}  ")
+            
+            # Добавляем информацию о диапазоне
+            info_text = f"Время: {x_start:.2f} — {x_end:.2f} мс\nТочки: {start_idx} — {end_idx}"
+            lbl = ttk.Label(frame, text=info_text, background=PANEL_BG,
+                           font=("Segoe UI", 9))
+            lbl.pack(padx=4, pady=4)
+            
+            self._peak_range_tabs[tab_name] = (x_start, x_end, start_idx, end_idx)
+        
+        # Привязываем событие переключения вкладок
+        self.peak_range_notebook.bind("<<NotebookTabChanged>>", self._on_peak_range_tab_changed)
+
+    def _on_peak_range_tab_changed(self, event):
+        """Обработчик переключения вкладок диапазонов."""
+        try:
+            tab_name = self.peak_range_notebook.tab(self.peak_range_notebook.select(), "text").strip()
+            if tab_name in self._peak_range_tabs and isinstance(self._peak_range_tabs[tab_name], tuple):
+                x_start, x_end, _, _ = self._peak_range_tabs[tab_name]
+                self._calculate_and_draw_peaks(x_start, x_end)
+                self._peak_range = (x_start, x_end)
+                
+                # Подсветка на основном графике
+                if self._peak_selection_rect is not None:
+                    self._peak_selection_rect.remove()
+                self._peak_selection_rect = self.result_ax.axvspan(
+                    x_start, x_end, alpha=0.25, color='#fbbf24', zorder=0)
+                self.result_canvas.draw()
+        except Exception:
+            pass
+
     def _start_peak_selection(self):
         if not self.loader.result_channels:
             messagebox.showinfo("Информация", "Сначала загрузите данные и выполните расчёт")
@@ -1996,6 +2112,8 @@ class DinamikaApp:
         self._update_calib_notebook_for_layer()
         self._draw_disp_chart()
         self._draw_magnet_chart()
+        # Обновляем автоматические диапазоны для пиков при переключении слоя
+        self._update_auto_peak_ranges()
 
     def _update_calib_notebook_for_layer(self):
         for t in self._calib_tabs.values():

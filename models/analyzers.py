@@ -261,3 +261,73 @@ class SignalAnalyzer:
             return None
 
         return (overlap_left, overlap_right)
+
+    @staticmethod
+    def find_zero_crossings(values, baseline=0.0, threshold=0.0001):
+        """
+        Поиск точек пересечения сигнала с базовой линией (нулем).
+        
+        Args:
+            values: массив значений сигнала
+            baseline: базовая линия (по умолчанию 0.0)
+            threshold: порог для обнаружения пересечения
+            
+        Returns:
+            list: список индексов точек пересечения
+        """
+        arr = np.asarray(values, dtype=float)
+        n = len(arr)
+        if n < 2:
+            return []
+        
+        # Центрируем данные относительно baseline
+        centered = arr - baseline
+        
+        crossings = []
+        for i in range(n - 1):
+            # Проверяем пересечение с нулем
+            if centered[i] * centered[i + 1] < 0:
+                # Точное пересечение между i и i+1
+                crossings.append(i + 1)
+            elif abs(centered[i]) < threshold and (i == 0 or abs(centered[i - 1]) >= threshold):
+                # Сигнал на нуле
+                crossings.append(i)
+        
+        return crossings
+
+    @staticmethod
+    def find_peak_ranges(time, values, baseline=0.0, min_gap_points=10):
+        """
+        Определение диапазонов между точками пересечения с нулем.
+        
+        Args:
+            time: массив времени
+            values: массив значений сигнала (центрированный)
+            baseline: базовая линия (по умолчанию 0.0)
+            min_gap_points: минимальное количество точек между пересечениями
+            
+        Returns:
+            list: список кортежей (time_start, time_end, start_idx, end_idx)
+        """
+        crossings = SignalAnalyzer.find_zero_crossings(values, baseline)
+        
+        if len(crossings) < 2:
+            # Если меньше 2 пересечений, берем весь диапазон
+            if len(crossings) == 1:
+                return [(time[0], time[-1], 0, len(values) - 1)]
+            return [(time[0], time[-1], 0, len(values) - 1)]
+        
+        ranges = []
+        for i in range(len(crossings) - 1):
+            start_idx = crossings[i]
+            end_idx = crossings[i + 1]
+            
+            # Проверяем минимальную длину диапазона
+            if end_idx - start_idx >= min_gap_points:
+                ranges.append((time[start_idx], time[end_idx], start_idx, end_idx))
+        
+        # Если не нашли подходящих диапазонов, возвращаем весь диапазон
+        if not ranges:
+            return [(time[0], time[-1], 0, len(values) - 1)]
+        
+        return ranges
