@@ -1926,7 +1926,7 @@ class DinamikaApp:
             self.status_var.set("Загрузка температур...")
             self.root.update_idletasks()
 
-            self.loader = DataLoader()
+            # Не создаём новый DataLoader, используем существующий
             if path.lower().endswith('.xlsx'):
                 self.loader.load_temperature_xlsx(path)
             else:
