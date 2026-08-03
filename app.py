@@ -12,8 +12,11 @@ from matplotlib.figure import Figure
 from matplotlib import rcParams
 import matplotlib.dates as mdates
 from pathlib import Path
+import threading
 
 from calc import DataLoader
+from core.calculator import Calculator
+from utils.worker import run_async, LoadingOverlay
 
 BG = "#f0f2f5"
 FG = "#1a1a2e"
@@ -94,6 +97,7 @@ class DinamikaApp:
         self.root.configure(bg=BG)
 
         self.loader = DataLoader()
+        self.calculator = Calculator(self.loader)
         self._file_path = None
         self._channel_visibility = {}
         self._dynamics_file_path = None
@@ -108,7 +112,6 @@ class DinamikaApp:
         self._calib_range_target = None
         self._calib_range_highlights = {}  # {layer: (left, right)}
         self._peak_range = None
-        self._manual_zero_var = tk.StringVar()
         self._calculating = False
 
         _style_app()
@@ -179,184 +182,27 @@ class DinamikaApp:
         self.tab_temp = ttk.Frame(self.global_notebook)
         self.global_notebook.add(self.tab_temp, text="  Температуры  ")
 
-        self._build_deform_tab(self.tab_deform)
+        # Используем вынесенный класс DeformationsTab
+        from ui.tabs import DeformationsTab
+        self.deformations_tab = DeformationsTab(self.tab_deform, self)
+        
         self._build_temp_tab(self.tab_temp)
 
+    # Метод _build_deform_tab теперь находится в ui/tabs/deformations.py
+    # Оставлен как заглушка для обратной совместимости, если нужно
     def _build_deform_tab(self, parent):
-        main_paned = ttk.PanedWindow(parent, orient=tk.VERTICAL)
-        main_paned.pack(fill=tk.BOTH, expand=True)
+        """Заглушка - теперь используется DeformationsTab из ui.tabs."""
+        pass
 
-        top_paned = ttk.PanedWindow(main_paned, orient=tk.HORIZONTAL)
-        main_paned.add(top_paned, weight=1)
+    def _make_tree(self, parent):
+        """Создает Treeview с прокруткой."""
+        from ui.components import create_treeview
+        return create_treeview(parent)
 
-        left_frame = ttk.LabelFrame(top_paned, text=" Динамика — Исходные данные (Drop CSV/XLSX)")
-        top_paned.add(left_frame, weight=3)
-        src_btn_frame = ttk.Frame(left_frame)
-        src_btn_frame.pack(fill=tk.X, padx=4, pady=(4, 0))
-        ttk.Button(src_btn_frame, text="Сброс", style="ToolbarCsv.TButton",
-                   command=self._reset_dynamics).pack(side=tk.RIGHT, padx=2)
-        self.source_notebook = ttk.Notebook(left_frame)
-        self.source_notebook.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-        self._source_tabs = {}
-        self.source_notebook.bind("<<NotebookTabChanged>>", self._on_source_tab_changed)
-
-        right_frame = ttk.LabelFrame(top_paned, text=" Тарировка — Калибровочная кривая (Drop CSV/XLSX)")
-        top_paned.add(right_frame, weight=2)
-        cal_btn_frame = ttk.Frame(right_frame)
-        cal_btn_frame.pack(fill=tk.X, padx=4, pady=(4, 0))
-        ttk.Button(cal_btn_frame, text="Сброс", style="ToolbarCsv.TButton",
-                   command=self._reset_calibration).pack(side=tk.RIGHT, padx=2)
-        self.calib_notebook = ttk.Notebook(right_frame)
-        self.calib_notebook.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-        self._calib_tabs = {}
-
-        # Drag-and-drop — hook root window, determine zone by mouse position
-        windnd.hook_dropfiles(self.root, func=self._on_drop_root)
-
-        raw_chart_frame = ttk.LabelFrame(top_paned, text=" Данные динамики ")
-        top_paned.add(raw_chart_frame, weight=3)
-
-        # Pack toolbar and toggle frames first (at bottom)
-        self.channel_toggle_frame = ttk.Frame(raw_chart_frame)
-        self.channel_toggle_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=(0, 2))
-
-        raw_tb = ttk.Frame(raw_chart_frame)
-        raw_tb.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=(0, 4))
-        self.raw_toolbar_frame = raw_tb
-
-        # Create notebook and tabs
-        self.raw_notebook = ttk.Notebook(raw_chart_frame)
-
-        self.tab_time = ttk.Frame(self.raw_notebook)
-        self.raw_notebook.add(self.tab_time, text="  Динамика  ")
-
-        self.tab_disp = ttk.Frame(self.raw_notebook)
-        self.raw_notebook.add(self.tab_disp, text="  Тарировка  ")
-
-        self.tab_magnet = ttk.Frame(self.raw_notebook)
-        self.raw_notebook.add(self.tab_magnet, text="  Положение магнита  ")
-
-        self.raw_fig = Figure(figsize=(5, 3), dpi=100)
-        self.raw_ax = self.raw_fig.add_subplot(111)
-        self.raw_canvas = FigureCanvasTkAgg(self.raw_fig, master=self.tab_time)
-        self.raw_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-        self.disp_fig = Figure(figsize=(5, 3), dpi=100)
-        self.disp_ax = self.disp_fig.add_subplot(111)
-        self.disp_canvas = FigureCanvasTkAgg(self.disp_fig, master=self.tab_disp)
-        self.disp_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-        self.magnet_fig = Figure(figsize=(5, 3), dpi=100)
-        self.magnet_ax = self.magnet_fig.add_subplot(111)
-        self.magnet_canvas = FigureCanvasTkAgg(self.magnet_fig, master=self.tab_magnet)
-        self.magnet_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-        # Pack notebook last (fills remaining space above toolbar/toggles)
-        self.raw_notebook.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-
-        self.raw_toolbar = NavigationToolbar2Tk(self.raw_canvas, raw_tb)
-        self.raw_toolbar.update()
-        self.disp_toolbar = NavigationToolbar2Tk(self.disp_canvas, raw_tb)
-        self.disp_toolbar.pack_forget()
-        self.magnet_toolbar = NavigationToolbar2Tk(self.magnet_canvas, raw_tb)
-        self.magnet_toolbar.pack_forget()
-
-        self.raw_notebook.bind("<<NotebookTabChanged>>", self._on_raw_tab_changed)
-
-        calib_sel_frame = ttk.LabelFrame(top_paned, text=" Выбор тарировки ")
-        top_paned.add(calib_sel_frame, weight=2)
-
-        calib_sel_btn_frame = ttk.Frame(calib_sel_frame)
-        calib_sel_btn_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=(0, 4))
-        ttk.Button(calib_sel_btn_frame, text="Применить", style="ToolbarCsv.TButton",
-                   command=self._apply_calib_selection).pack(side=tk.LEFT, padx=2)
-        ttk.Button(calib_sel_btn_frame, text="Выбрать диапазон", style="ToolbarCsv.TButton",
-                   command=self._start_calib_range_selection).pack(side=tk.LEFT, padx=2)
-        ttk.Button(calib_sel_btn_frame, text="Сбросить вручную", style="ToolbarCsv.TButton",
-                   command=self._reset_calib_manual).pack(side=tk.LEFT, padx=2)
-        self.calib_sel_info_label = ttk.Label(calib_sel_btn_frame, text="", style="Info.TLabel")
-        self.calib_sel_info_label.pack(side=tk.LEFT, padx=8)
-
-        calib_sel_container = ttk.Frame(calib_sel_frame)
-        calib_sel_container.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-        self.calib_sel_canvas = tk.Canvas(calib_sel_container, bg=PANEL_BG, highlightthickness=0)
-        calib_sel_vsb = ttk.Scrollbar(calib_sel_container, orient=tk.VERTICAL,
-                                       command=self.calib_sel_canvas.yview)
-        self.calib_sel_inner = ttk.Frame(self.calib_sel_canvas)
-        self.calib_sel_inner.bind(
-            "<Configure>",
-            lambda e: self.calib_sel_canvas.configure(scrollregion=self.calib_sel_canvas.bbox("all"))
-        )
-        self.calib_sel_canvas.create_window((0, 0), window=self.calib_sel_inner, anchor="nw")
-        self.calib_sel_canvas.configure(yscrollcommand=calib_sel_vsb.set)
-        self.calib_sel_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        calib_sel_vsb.pack(side=tk.RIGHT, fill=tk.Y)
-
-        bot_paned = ttk.PanedWindow(main_paned, orient=tk.HORIZONTAL)
-        main_paned.add(bot_paned, weight=3)
-
-        res = ttk.LabelFrame(bot_paned, text=" Результат расчёта ")
-        bot_paned.add(res, weight=2)
-        self.tree_result = self._make_tree(res)
-
-        chart = ttk.LabelFrame(bot_paned, text=" График: Перемещение от времени ")
-        bot_paned.add(chart, weight=3)
-
-        self.result_fig = Figure(figsize=(7, 4), dpi=100)
-        self.result_ax = self.result_fig.add_subplot(111)
-
-        # Pack toggle frame and toolbar first (at bottom)
-        self.result_toggle_frame = ttk.Frame(chart)
-        self.result_toggle_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=(0, 2))
-
-        tb_frame = ttk.Frame(chart)
-        tb_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=(0, 4))
-
-        # Create and pack canvas last (fills remaining space)
-        self.result_canvas = FigureCanvasTkAgg(self.result_fig, master=chart)
-        self.result_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-
-        self.result_canvas.mpl_connect('motion_notify_event', self._on_result_motion)
-        self.result_canvas.mpl_connect('axes_leave_event', self._on_result_leave)
-
-        self.result_toolbar = NavigationToolbar2Tk(self.result_canvas, tb_frame)
-        self.result_toolbar.update()
-
-        # === Peak values panel ===
-        peak_frame = ttk.LabelFrame(bot_paned, text=" Пиковые значения ")
-        bot_paned.add(peak_frame, weight=2)
-
-        peak_btn_frame = ttk.Frame(peak_frame)
-        peak_btn_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=(0, 4))
-
-        self.peak_select_btn = ttk.Button(peak_btn_frame, text="Выбрать диапазон",
-                                           style="ToolbarCsv.TButton",
-                                           command=self._start_peak_selection)
-        self.peak_select_btn.pack(side=tk.LEFT, padx=2)
-
-        ttk.Label(peak_btn_frame, text="Ноль:", background=BG,
-                  font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=(8, 2))
-        self.zero_entry = ttk.Entry(peak_btn_frame, textvariable=self._manual_zero_var,
-                                    width=8, font=("Consolas", 9))
-        self.zero_entry.pack(side=tk.LEFT, padx=2)
-        ttk.Button(peak_btn_frame, text="Задать", style="ToolbarCsv.TButton",
-                   command=self._apply_manual_zero).pack(side=tk.LEFT, padx=2)
-        ttk.Button(peak_btn_frame, text="Авто", style="ToolbarCsv.TButton",
-                   command=self._reset_manual_zero).pack(side=tk.LEFT, padx=2)
-
-        self.peak_info_label = ttk.Label(peak_btn_frame, text="", style="Info.TLabel")
-        self.peak_info_label.pack(side=tk.LEFT, padx=8)
-
-        self.peak_fig = Figure(figsize=(5, 4), dpi=100)
-        self.peak_ax = self.peak_fig.add_subplot(111)
-        self.peak_canvas = FigureCanvasTkAgg(self.peak_fig, master=peak_frame)
-        self.peak_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-
-        self._peak_selection_active = False
-        self._peak_selection_start = None
-        self._peak_selection_rect = None
-        self._peak_press_id = None
-        self._peak_release_id = None
+    def _populate_tree(self, tree, df):
+        """Заполняет Treeview данными из DataFrame."""
+        from ui.components import populate_treeview
+        populate_treeview(tree, df)
 
     def _build_temp_tab(self, parent):
         self._temp_file_path = None
@@ -925,7 +771,6 @@ class DinamikaApp:
         self.loader.manual_zero_point = None
         self.loader.channel_mins = None
         self.loader.channel_baselines = None
-        self._manual_zero_var.set("")
         self._peak_range = None
         self._calib_range_highlights.clear()
         self.loader.per_layer_calib = {}
@@ -973,7 +818,6 @@ class DinamikaApp:
         self.loader.manual_zero_point = None
         self.loader.channel_mins = None
         self.loader.channel_baselines = None
-        self._manual_zero_var.set("")
         self._peak_range = None
         self._calib_range_highlights.clear()
         self._calibration_file_path = None
@@ -1035,7 +879,7 @@ class DinamikaApp:
                     if auto_range:
                         auto_left, auto_right = auto_range
                     else:
-                        auto_left, auto_right = self.loader._find_layer_overlap(cal["disp"], cal["tug"])
+                        auto_left, auto_right = self.calculator._find_layer_overlap(cal["disp"], cal["tug"])
                     if not auto_sensor or auto_sensor not in sensor_names:
                         auto_sensor = sensor_names[0]
                     info = {
@@ -1058,7 +902,7 @@ class DinamikaApp:
             info = self.loader._global_calib_info
             sensor_names = list(self.loader.calib_channels.keys())
             if not info:
-                auto_left, auto_right = self.loader._find_overlap_region()
+                auto_left, auto_right = self.calculator._find_overlap_region()
                 info = {
                     "sensor": sensor_names[0] if sensor_names else "",
                     "range_left": auto_left,
@@ -1301,59 +1145,80 @@ class DinamikaApp:
 
         self._calculating = True
         self.status_var.set("Выполнение расчёта...")
-        self.root.update_idletasks()
+        
+        # Используем асинхронное выполнение для тяжелых вычислений
+        def do_calculate():
+            try:
+                if has_per_layer:
+                    self.loader.calculate_per_layer_magnet()
+                    self.loader.calculate_per_layer()
+                else:
+                    self.loader.calculate()
+                return True
+            except Exception as e:
+                raise e
+        
+        def on_complete(result):
+            try:
+                self._populate_tree(self.tree_result, self.loader.result_df)
+                self._update_channel_toggles()
+                self._draw_result_chart()
+                self._draw_disp_chart(draw_magnet=False)
+                self._draw_magnet_chart()
+                self._update_calib_selection_panel()
 
-        try:
-            if has_per_layer:
-                self.loader.calculate_per_layer_magnet()
-                self.loader.calculate_per_layer()
-            else:
-                self.loader.calculate()
-            self._populate_tree(self.tree_result, self.loader.result_df)
-            self._update_channel_toggles()
-            self._draw_result_chart()
-            self._draw_disp_chart(draw_magnet=False)
-            self._draw_magnet_chart()
-            self._update_calib_selection_panel()
+                if self.loader.auto_zero_point is not None:
+                    if self.loader.manual_zero_point is None:
+                        pass  # Removed manual zero var usage
 
-            if self.loader.auto_zero_point is not None:
-                if self.loader.manual_zero_point is None:
-                    self._manual_zero_var.set(f"{self.loader.auto_zero_point:.3f}")
-                self._update_zero_entry_state()
+                if self._peak_range is not None:
+                    self._calculate_and_draw_peaks(*self._peak_range)
 
-            if self._peak_range is not None:
-                self._calculate_and_draw_peaks(*self._peak_range)
+                n = len(self.loader.result_df)
+                mn = self.loader.result_df.iloc[:, 1].min()
+                mx = self.loader.result_df.iloc[:, 1].max()
 
-            n = len(self.loader.result_df)
-            mn = self.loader.result_df.iloc[:, 1].min()
-            mx = self.loader.result_df.iloc[:, 1].max()
-
-            src_n = len(self.loader.source_data) if self.loader.source_data is not None else 0
-            cal_n = len(self.loader.calib_data) if self.loader.calib_data is not None else 0
-            mag = self.loader.magnet_info
-            n_ch = len(self.loader.result_channels) if self.loader.result_channels else 1
-            self.stats_var.set(f"Каналов: {n_ch}  |  Результат: {n} точек  |  {mn} — {mx} мм  |  {mag}")
-            self.status_var.set("Расчёт завершён")
-        except Exception as e:
-            messagebox.showerror("Ошибка расчёта", str(e))
+                src_n = len(self.loader.source_data) if self.loader.source_data is not None else 0
+                cal_n = len(self.loader.calib_data) if self.loader.calib_data is not None else 0
+                mag = self.loader.magnet_info
+                n_ch = len(self.loader.result_channels) if self.loader.result_channels else 1
+                self.stats_var.set(f"Каналов: {n_ch}  |  Результат: {n} точек  |  {mn} — {mx} мм  |  {mag}")
+                self.status_var.set("Расчёт завершён")
+            except Exception as e:
+                messagebox.showerror("Ошибка расчёта", str(e))
+                self.status_var.set("Ошибка расчёта")
+            finally:
+                self._calculating = False
+        
+        def on_error(error):
+            messagebox.showerror("Ошибка расчёта", str(error))
             self.status_var.set("Ошибка расчёта")
-        finally:
             self._calculating = False
+        
+        # Запускаем вычисления в фоновом потоке с индикатором загрузки
+        run_async(
+            func=do_calculate,
+            parent=self.root,
+            loading_text="Выполняется расчёт...",
+            on_complete=on_complete,
+            on_error=on_error
+        )
 
     def _draw_result_chart(self):
         self.result_ax.clear()
         self.result_ax.set_title("Перемещение от времени")
 
-        if self.loader.result_channels:
+        # График "Перемещение от времени" должен показывать сырые данные (без центрирования)
+        if hasattr(self.loader, 'result_channels_raw') and self.loader.result_channels_raw:
             visible_any = False
-            for i, (ch_name, ch_data) in enumerate(self.loader.result_channels.items()):
+            for i, (ch_name, ch_data) in enumerate(self.loader.result_channels_raw.items()):
                 visible = True
                 if hasattr(self, '_result_vars') and ch_name in self._result_vars:
                     visible = self._result_vars[ch_name].get()
                 if visible:
                     color = CHANNEL_COLORS[i % len(CHANNEL_COLORS)]
                     self.result_ax.plot(self.loader.dynamics_time, ch_data,
-                                        linewidth=0.8, color=color, label=ch_name)
+                                        linewidth=0.6, color=color, label=ch_name, rasterized=True)
                     visible_any = True
             if visible_any:
                 self.result_ax.legend(loc="upper right", fontsize=8)
@@ -1362,7 +1227,7 @@ class DinamikaApp:
         elif self.loader.result_df is not None and not self.loader.result_df.empty:
             self.result_ax.plot(self.loader.result_df["Время, мсек"],
                                 self.loader.result_df["Перемещение, мм"],
-                                linewidth=0.8, color="#2196F3")
+                                linewidth=0.6, color="#2196F3", rasterized=True)
             self.result_ax.set_xlabel("Время, мсек")
             self.result_ax.set_ylabel("Перемещение, мм")
         else:
@@ -1370,7 +1235,7 @@ class DinamikaApp:
                                 ha="center", va="center", transform=self.result_ax.transAxes,
                                 fontsize=12, color="#94a3b8")
 
-        self.result_ax.grid(True, alpha=0.3)
+        self.result_ax.grid(True, alpha=0.2)
 
         self.result_fig.tight_layout()
         self.result_canvas.draw()
@@ -1401,31 +1266,11 @@ class DinamikaApp:
 
     # === Peak selection methods ===
 
-    def _update_zero_entry_state(self):
-        if self.loader.manual_zero_point is not None:
-            self._manual_zero_var.set(f"{self.loader.manual_zero_point:.3f}")
-        elif self.loader.auto_zero_point is not None:
-            self._manual_zero_var.set(f"{self.loader.auto_zero_point:.3f}")
-
     def _apply_manual_zero(self):
-        if not self.loader.result_channels:
-            messagebox.showinfo("Информация", "Сначала выполните расчёт")
-            return
-        try:
-            value = float(self._manual_zero_var.get().replace(",", "."))
-            self.loader.set_manual_zero(value)
-            if self._peak_range is not None:
-                self._calculate_and_draw_peaks(*self._peak_range)
-            self.status_var.set(f"Ноль задан вручную: {value:.3f} мм")
-        except ValueError:
-            messagebox.showerror("Ошибка", "Введите числовое значение нуля (мм)")
+        pass  # Removed - no longer used
 
     def _reset_manual_zero(self):
-        self.loader.clear_manual_zero()
-        self._update_zero_entry_state()
-        if self._peak_range is not None:
-            self._calculate_and_draw_peaks(*self._peak_range)
-        self.status_var.set("Ноль рассчитан автоматически")
+        pass  # Removed - no longer used
 
     def _start_peak_selection(self):
         if not self.loader.result_channels:
@@ -1489,7 +1334,7 @@ class DinamikaApp:
         time = self.loader.dynamics_time
         mask = (time >= x_start) & (time <= x_end)
         zero_point = self.loader.zero_point
-        DEVIATION_THRESHOLD = 0.02  # mm
+        DEVIATION_THRESHOLD = 0.0001  # mm
 
         names = []
         deviations = []
@@ -1501,8 +1346,9 @@ class DinamikaApp:
             if len(ch_in_range) == 0:
                 continue
             baseline = baselines[ch_name]
+            # Для центрированных данных deviation считается от нуля (т.к. данные уже центрированы)
             max_in_range = float(np.max(ch_in_range))
-            deviation = max_in_range - zero_point
+            deviation = max_in_range  # Данные уже центрированы относительно своего baseline
             if deviation < DEVIATION_THRESHOLD:
                 continue
             names.append(ch_name)
@@ -1618,7 +1464,7 @@ class DinamikaApp:
                 if visible:
                     color = CHANNEL_COLORS[i % len(CHANNEL_COLORS)]
                     self.raw_ax.plot(self.loader.dynamics_time, ch_data,
-                                     linewidth=0.6, color=color, label=ch_name)
+                                     linewidth=0.6, color=color, label=ch_name, rasterized=True)
                     visible_any = True
             if visible_any:
                 self.raw_ax.legend(loc="upper right", fontsize=8)
@@ -1630,7 +1476,7 @@ class DinamikaApp:
             src_val = src_cols[1] if len(src_cols) > 1 else src_cols[0]
             self.raw_ax.plot(self.loader.source_data[src_time],
                              self.loader.source_data[src_val],
-                             linewidth=0.6, color="#4CAF50")
+                             linewidth=0.6, color="#4CAF50", rasterized=True)
             self.raw_ax.set_xlabel(src_time)
             self.raw_ax.set_ylabel(src_val)
         else:
@@ -1638,7 +1484,7 @@ class DinamikaApp:
                              ha="center", va="center", transform=self.raw_ax.transAxes,
                              fontsize=12, color="#94a3b8")
 
-        self.raw_ax.grid(True, alpha=0.3)
+        self.raw_ax.grid(True, alpha=0.2)
         self.raw_fig.tight_layout()
         self.raw_canvas.draw()
 
@@ -1648,7 +1494,7 @@ class DinamikaApp:
         """Рисует тарировку: восходящий участок ярко, скат — бледно."""
         disp = np.asarray(disp, dtype=float)
         tug = np.asarray(tug, dtype=float)
-        min_idx, peak_idx = self.loader._find_rising_indices(tug)
+        min_idx, peak_idx = self.calculator._find_rising_indices(tug)
 
         if min_idx > 0:
             ax.plot(disp[:min_idx + 1], tug[:min_idx + 1],
@@ -1682,9 +1528,9 @@ class DinamikaApp:
                     info = self.loader._per_layer_calib_info.get(ch_name)
                     if info:
                         self.disp_ax.axvline(info["range_left"], color="#ef4444",
-                                             linewidth=1.2, linestyle="--", alpha=0.7)
+                                             linewidth=1.0, linestyle="--", alpha=0.6)
                         self.disp_ax.axvline(info["range_right"], color="#ef4444",
-                                             linewidth=1.2, linestyle="--", alpha=0.7)
+                                             linewidth=1.0, linestyle="--", alpha=0.6)
                     visible_any = True
             if visible_any:
                 self.disp_ax.legend(loc="upper right", fontsize=7)
@@ -1704,13 +1550,13 @@ class DinamikaApp:
             info = self.loader._global_calib_info
             if info:
                 self.disp_ax.axvline(info["range_left"], color="#ef4444",
-                                     linewidth=1.2, linestyle="--", alpha=0.7)
+                                     linewidth=1.0, linestyle="--", alpha=0.6)
                 self.disp_ax.axvline(info["range_right"], color="#ef4444",
-                                     linewidth=1.2, linestyle="--", alpha=0.7)
+                                     linewidth=1.0, linestyle="--", alpha=0.6)
             elif self.loader._overlap_range:
                 rl, rr = self.loader._overlap_range
-                self.disp_ax.axvline(rl, color="#ef4444", linewidth=1.2, linestyle="--", alpha=0.7)
-                self.disp_ax.axvline(rr, color="#ef4444", linewidth=1.2, linestyle="--", alpha=0.7)
+                self.disp_ax.axvline(rl, color="#ef4444", linewidth=1.0, linestyle="--", alpha=0.6)
+                self.disp_ax.axvline(rr, color="#ef4444", linewidth=1.0, linestyle="--", alpha=0.6)
             if visible_any:
                 self.disp_ax.legend(loc="upper right", fontsize=8)
             self.disp_ax.set_xlabel("мм")
@@ -1721,7 +1567,7 @@ class DinamikaApp:
             cal_val = cal_cols[1] if len(cal_cols) > 1 else cal_cols[0]
             self.disp_ax.plot(self.loader.calib_data[cal_disp],
                               self.loader.calib_data[cal_val],
-                              linewidth=0.8, color="#4CAF50")
+                              linewidth=0.6, color="#4CAF50", rasterized=True)
             self.disp_ax.set_xlabel(cal_disp)
             self.disp_ax.set_ylabel(cal_val)
         else:
@@ -1730,9 +1576,9 @@ class DinamikaApp:
                               fontsize=12, color="#94a3b8")
 
         for rl, rr in self._calib_range_highlights.values():
-            self.disp_ax.axvspan(rl, rr, alpha=0.15, color='#fbbf24', zorder=0)
+            self.disp_ax.axvspan(rl, rr, alpha=0.1, color='#fbbf24', zorder=0)
 
-        self.disp_ax.grid(True, alpha=0.3)
+        self.disp_ax.grid(True, alpha=0.2)
         self.disp_fig.tight_layout()
         self.disp_canvas.draw()
 
@@ -1772,12 +1618,12 @@ class DinamikaApp:
                 for tug_name, tug_vals in cal["tug"].items():
                     color = CHANNEL_COLORS[color_idx % len(CHANNEL_COLORS)]
                     is_sel = (tug_name == selected)
-                    lw = 2.2 if is_sel else 0.8
-                    alpha = 1.0 if is_sel else 0.55
+                    lw = 2.2 if is_sel else 0.6
+                    alpha = 1.0 if is_sel else 0.4
                     suffix = " *" if is_sel else ""
                     label = f"{ch_name} — {tug_name}{suffix}"
                     self.magnet_ax.plot(cal["disp"], tug_vals,
-                                        linewidth=lw, color=color, alpha=alpha, label=label)
+                                        linewidth=lw, color=color, alpha=alpha, label=label, rasterized=(not is_sel))
 
                     ix_info = layer_ix.get(tug_name, {})
                     mid_y = ix_info.get('mid_y')
@@ -1786,21 +1632,21 @@ class DinamikaApp:
                         mid_y = tug_vals[mid_idx]
                     x_pts = ix_info.get('x_points', np.array([]))
 
-                    self.magnet_ax.axhline(y=mid_y, color=color, linewidth=1,
-                                           linestyle='--', alpha=0.65)
+                    self.magnet_ax.axhline(y=mid_y, color=color, linewidth=0.8,
+                                           linestyle='--', alpha=0.5)
                     if len(x_pts) > 0:
                         self.magnet_ax.plot(x_pts, np.full_like(x_pts, mid_y), 'o',
-                                            color=color, markersize=6,
-                                            markeredgecolor='black', markeredgewidth=0.8, zorder=5)
+                                            color=color, markersize=5,
+                                            markeredgecolor='black', markeredgewidth=0.6, zorder=5)
                     color_idx += 1
 
                 if magnet_x is not None:
                     y_vals = [np.interp(magnet_x, cal["disp"], tv) for tv in cal["tug"].values()]
                     y_mark = float(np.mean(y_vals)) if y_vals else 0
-                    self.magnet_ax.axvline(x=magnet_x, color='red', linewidth=2.5,
-                                           linestyle='-', alpha=0.9, zorder=6)
+                    self.magnet_ax.axvline(x=magnet_x, color='red', linewidth=2.0,
+                                           linestyle='-', alpha=0.8, zorder=6)
                     self.magnet_ax.plot(magnet_x, y_mark, 'v', color='red',
-                                        markersize=10, zorder=7)
+                                        markersize=9, zorder=7)
                     sel_txt = f", {selected}" if selected else ""
                     self.magnet_ax.annotate(
                         f"{ch_name}: X={magnet_x:.1f} мм{sel_txt}",
@@ -1833,30 +1679,30 @@ class DinamikaApp:
                 color = CHANNEL_COLORS[i % len(CHANNEL_COLORS)]
                 is_selected = (ch_name == selected)
 
-                lw = 2.5 if is_selected else 0.8
-                alpha = 1.0 if is_selected else 0.5
+                lw = 2.5 if is_selected else 0.6
+                alpha = 1.0 if is_selected else 0.4
                 label = f"{ch_name} *" if is_selected else ch_name
-                self.magnet_ax.plot(disp, ch_data, linewidth=lw, color=color, alpha=alpha, label=label)
+                self.magnet_ax.plot(disp, ch_data, linewidth=lw, color=color, alpha=alpha, label=label, rasterized=(not is_selected))
 
                 if ch_name in self.loader._magnet_intersections:
                     info = self.loader._magnet_intersections[ch_name]
                     mid_y = info['mid_y']
                     x_pts = info['x_points']
 
-                    self.magnet_ax.axhline(y=mid_y, color=color, linewidth=1, linestyle='--', alpha=0.7)
+                    self.magnet_ax.axhline(y=mid_y, color=color, linewidth=0.8, linestyle='--', alpha=0.5)
 
                     self.magnet_ax.plot(x_pts, np.full_like(x_pts, mid_y), 'o',
-                                        color=color, markersize=7, markeredgecolor='black',
-                                        markeredgewidth=1.0, zorder=5)
+                                        color=color, markersize=6, markeredgecolor='black',
+                                        markeredgewidth=0.8, zorder=5)
 
             mag_x = self.loader._magnet_x
             if mag_x is not None:
-                self.magnet_ax.axvline(x=mag_x, color='red', linewidth=2.5, linestyle='-',
+                self.magnet_ax.axvline(x=mag_x, color='red', linewidth=2.0, linestyle='-',
                                        label=f"Магнит X={mag_x:.1f}")
 
                 y_lo, y_hi = self.magnet_ax.get_ylim()
                 y_mark = y_lo + (y_hi - y_lo) * 0.03
-                self.magnet_ax.plot(mag_x, y_mark, 'v', color='red', markersize=10, zorder=6)
+                self.magnet_ax.plot(mag_x, y_mark, 'v', color='red', markersize=9, zorder=6)
 
             self.magnet_ax.legend(loc="upper right", fontsize=7)
             self.magnet_ax.set_xlabel("мм")
@@ -1866,7 +1712,7 @@ class DinamikaApp:
                                 ha="center", va="center", transform=self.magnet_ax.transAxes,
                                 fontsize=12, color="#94a3b8")
 
-        self.magnet_ax.grid(True, alpha=0.3)
+        self.magnet_ax.grid(True, alpha=0.2)
         self.magnet_fig.tight_layout()
         self.magnet_canvas.draw()
 
