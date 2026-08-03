@@ -1443,9 +1443,6 @@ class DinamikaApp:
                     if self.loader.manual_zero_point is None:
                         pass  # Removed manual zero var usage
 
-                # После расчета автоматически находим и отображаем пики
-                self.root.after(100, self._auto_detect_and_draw_peaks)
-
                 n = len(self.loader.result_df)
                 mn = self.loader.result_df.iloc[:, 1].min()
                 mx = self.loader.result_df.iloc[:, 1].max()
@@ -1456,6 +1453,9 @@ class DinamikaApp:
                 n_ch = len(self.loader.result_channels) if self.loader.result_channels else 1
                 self.stats_var.set(f"Каналов: {n_ch}  |  Результат: {n} точек  |  {mn} — {mx} мм  |  {mag}")
                 self.status_var.set("Расчёт завершён")
+                
+                # После расчета и обновления панели калибровки автоматически находим и отображаем пики
+                self.root.after(150, self._auto_detect_and_draw_peaks)
             except Exception as e:
                 messagebox.showerror("Ошибка расчёта", str(e))
                 self.status_var.set("Ошибка расчёта")
@@ -1704,6 +1704,7 @@ class DinamikaApp:
             self._peak_range = (valid_segments[0]['start'], valid_segments[0]['end'])
             self._create_peak_tabs()
             self._calculate_and_draw_peaks(valid_segments[0]['start'], valid_segments[0]['end'])
+            print(f"[DEBUG] Найдено сегментов: {len(valid_segments)}, выбран первый: [{valid_segments[0]['start']:.2f}, {valid_segments[0]['end']:.2f}]")
         else:
             # Если не нашли валидных сегментов, берем весь диапазон
             if len(time) > 0:
@@ -1713,6 +1714,7 @@ class DinamikaApp:
                 self.peak_segments = [{'start': x_start, 'end': x_end}]
                 self._create_peak_tabs()
                 self._calculate_and_draw_peaks(x_start, x_end)
+                print(f"[DEBUG] Сегменты не найдены, используем весь диапазон: [{x_start:.2f}, {x_end:.2f}]")
     
     def _create_peak_tabs(self):
         """Создает кнопки-вкладки для каждого найденного сегмента."""
