@@ -320,6 +320,10 @@ class XLSXLoader:
 
     def load_calibration_for_layer(self, path, layer_name):
         """Загрузка калибровки для конкретного слоя."""
+        # Инициализируем словарь если он ещё не создан
+        if not hasattr(self, 'per_layer_calib') or self.per_layer_calib is None:
+            self.per_layer_calib = {}
+        
         if path.lower().endswith('.xlsx'):
             df = pd.read_excel(path, header=None, dtype=float)
         else:
