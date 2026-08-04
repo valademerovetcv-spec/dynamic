@@ -117,20 +117,23 @@ class MagnetLocator:
             for tug in tug_list:
                 levels.append(float(tug[idx]))
 
-        # Поиск точек пересечения для каждого датчика
+        # Поиск точек пересечения для каждого датчика (векторизованный поиск)
         sensor_data = {}
         for name, tug in zip(tug_names, tug_list):
             x_points = []
+            # Векторизованный поиск пересечений для всех уровней сразу
             for level in levels:
-                for i in range(len(tug) - 1):
-                    if (tug[i] - level) * (tug[i + 1] - level) < 0:
-                        x0, x1 = disp[i], disp[i + 1]
-                        y0, y1 = tug[i], tug[i + 1]
-                        if y1 != y0:
-                            t = (level - y0) / (y1 - y0)
-                            x_cross = x0 + t * (x1 - x0)
-                            if overlap_left <= x_cross <= overlap_right:
-                                x_points.append(float(x_cross))
+                diff = tug - level
+                sign_changes = np.where(diff[:-1] * diff[1:] < 0)[0]
+                
+                for i in sign_changes:
+                    x0, x1 = disp[i], disp[i + 1]
+                    y0, y1 = tug[i], tug[i + 1]
+                    if y1 != y0:
+                        t = (level - y0) / (y1 - y0)
+                        x_cross = x0 + t * (x1 - x0)
+                        if overlap_left <= x_cross <= overlap_right:
+                            x_points.append(float(x_cross))
 
             x_points = sorted(set(x_points))
 

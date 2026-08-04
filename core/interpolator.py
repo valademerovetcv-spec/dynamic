@@ -158,8 +158,8 @@ class Interpolator:
         tug = np.asarray(tug, dtype=float)
         min_idx, peak_idx = MagnetLocator.find_rising_indices(tug)
 
-        cal_disp = disp[min_idx:peak_idx + 1]
-        cal_tug = tug[min_idx:peak_idx + 1]
+        cal_disp = disp[min_idx:peak_idx + 1].copy()
+        cal_tug = tug[min_idx:peak_idx + 1].copy()
 
         if range_left is not None:
             m = cal_disp >= range_left
@@ -171,3 +171,58 @@ class Interpolator:
             cal_tug = cal_tug[m]
 
         return cal_disp, cal_tug
+    
+    @staticmethod
+    def prepare_calib_branch(disp, tug, range_left=None, range_right=None):
+        """
+        Предварительная подготовка калибровочных данных с кэшированием.
+        Возвращает уже отсортированные данные для быстрой интерполяции.
+        
+        Args:
+            disp: массив перемещений
+            tug: массив значений датчика
+            range_left: левая граница диапазона (опционально)
+            range_right: правая граница диапазона (опционально)
+            
+        Returns:
+            dict: {
+                'cal_disp': отсортированные перемещения,
+                'cal_tug': отсортированные значения датчика,
+                'disp_raw': сырые перемещения (для статистики),
+                'tug_raw': сырые значения (для статистики)
+            }
+        """
+        from .magnet_locator import MagnetLocator
+        
+        disp = np.asarray(disp, dtype=float)
+        tug = np.asarray(tug, dtype=float)
+        min_idx, peak_idx = MagnetLocator.find_rising_indices(tug)
+
+        # Извлекаем восходящий участок
+        disp_raw = disp[min_idx:peak_idx + 1]
+        tug_raw = tug[min_idx:peak_idx + 1]
+        
+        cal_disp = disp_raw.copy()
+        cal_tug = tug_raw.copy()
+
+        # Фильтрация по диапазону
+        if range_left is not None:
+            m = cal_disp >= range_left
+            cal_disp = cal_disp[m]
+            cal_tug = cal_tug[m]
+        if range_right is not None:
+            m = cal_disp <= range_right
+            cal_disp = cal_disp[m]
+            cal_tug = cal_tug[m]
+
+        # Сортируем по значениям датчика для быстрой интерполяции
+        sort_idx = np.argsort(cal_tug)
+        cal_disp_sorted = cal_disp[sort_idx]
+        cal_tug_sorted = cal_tug[sort_idx]
+        
+        return {
+            'cal_disp': cal_disp_sorted,
+            'cal_tug': cal_tug_sorted,
+            'disp_raw': disp_raw,
+            'tug_raw': tug_raw,
+        }
