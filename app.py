@@ -191,11 +191,15 @@ class DinamikaApp:
         self.tab_temp = ttk.Frame(self.global_notebook)
         self.global_notebook.add(self.tab_temp, text="  Температуры  ")
 
+        # Новая вкладка для анализа деформаций
+        self.tab_analysis = ttk.Frame(self.global_notebook)
+        self.global_notebook.add(self.tab_analysis, text="  Анализ деформаций  ")
+
         self._build_deform_tab(self.tab_deform)
         self._build_temp_tab(self.tab_temp)
         
-        # Добавляем панель анализа деформаций после основных вкладок
-        self._build_deformation_panel(self.tab_deform)
+        # Добавляем панель анализа деформаций в отдельную вкладку
+        self._build_deformation_panel(self.tab_analysis)
 
     def _build_deform_tab(self, parent):
         main_paned = ttk.PanedWindow(parent, orient=tk.VERTICAL)
