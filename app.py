@@ -1709,7 +1709,84 @@ class DinamikaApp:
 
     def _populate_deformation_tab(self, frame, result, zone_idx, speed_kmh):
         """Заполнение вкладки данными об участке."""
-        # Верхняя панель с информацией
+        # График деформаций - занимает всё пространство
+        chart_frame = ttk.Frame(frame)
+        chart_frame.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
+        
+        fig = Figure(figsize=(8, 5), dpi=100)
+        ax = fig.add_subplot(111)
+        
+        x = result['x']
+        defs = result['defs']
+        
+        # Построение графиков для каждого слоя (переворачиваем знак для правильной ориентации)
+        for i in range(self.deformation_analyzer.n_layers):
+            layer_name = self.deformation_analyzer.layer_names[i]
+            color = CHANNEL_COLORS[i % len(CHANNEL_COLORS)]
+            ax.plot(x, -defs[:, i], linewidth=1.5, color=color, label=layer_name)
+        
+        ax.set_xlabel("Путь, м")
+        ax.set_ylabel("Деформация, мм")
+        ax.set_title(f"Деформации по слоям (участок {zone_idx + 1})")
+        ax.legend(loc="upper right", fontsize=8)
+        ax.grid(True, alpha=0.3)
+        
+        # Добавляем вертикальную линию курсора
+        cursor_line = ax.axvline(
+            result['largest_x'],
+            color="blue",
+            linestyle=":",
+            linewidth=1.2,
+            alpha=0.8,
+            visible=False
+        )
+        
+        cursor_points, = ax.plot(
+            [], [],
+            "o",
+            color="black",
+            markersize=4,
+            visible=False
+        )
+        
+        fig.tight_layout()
+        
+        canvas = FigureCanvasTkAgg(fig, master=chart_frame)
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # Toolbar для графика
+        toolbar = NavigationToolbar2Tk(canvas, chart_frame)
+        toolbar.update()
+        toolbar.pack_forget()  # Скрываем тулбар по умолчанию
+        
+        # Сохраняем ссылки на элементы для интерактивности
+        tab_data = {
+            "canvas": canvas,
+            "fig": fig,
+            "ax": ax,
+            "vline": cursor_line,
+            "cursor_pts": cursor_points,
+            "x": x,
+            "defs": -defs,  # Перевёрнутые значения для отображения
+            "time": result['time'],
+            "frozen": False,
+            "info_labels": {}
+        }
+        
+        # Подключаем обработчики событий
+        canvas.mpl_connect(
+            "motion_notify_event",
+            lambda event, zidx=zone_idx: self._on_deformation_motion(event, zidx)
+        )
+        canvas.mpl_connect(
+            "button_press_event",
+            lambda event, zidx=zone_idx: self._on_deformation_click(event, zidx)
+        )
+        
+        # Сохраняем данные вкладки
+        self._deformation_tabs[f"Участок {zone_idx + 1}"] = (zone_idx, result, frame, tab_data)
+        
+        # Верхняя панель с информацией (добавляем после графика)
         info_frame = ttk.Frame(frame)
         info_frame.pack(fill=tk.X, padx=4, pady=4)
         
@@ -1741,32 +1818,38 @@ class DinamikaApp:
                                 font=("Consolas", 9), justify=tk.LEFT)
         delta_label.pack(padx=4, pady=4)
         
-        # График деформаций
-        chart_frame = ttk.Frame(frame)
-        chart_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        # Панель с текущими значениями под курсором
+        cursor_panel = ttk.LabelFrame(frame, text=" Значения под курсором ")
+        cursor_panel.pack(fill=tk.X, padx=4, pady=4)
         
-        fig = Figure(figsize=(6, 3), dpi=100)
-        ax = fig.add_subplot(111)
+        cursor_info_frame = ttk.Frame(cursor_panel)
+        cursor_info_frame.pack(fill=tk.X, padx=4, pady=4)
         
-        x = result['x']
-        defs = result['defs']
+        # Время и расстояние
+        time_lbl = ttk.Label(cursor_info_frame, text=f"Время: — мс", 
+                            font=("Consolas", 9))
+        time_lbl.pack(side=tk.LEFT, padx=10)
         
-        # Построение графиков для каждого слоя (переворачиваем знак для правильной ориентации)
+        dist_lbl = ttk.Label(cursor_info_frame, text=f"Расстояние: — м", 
+                            font=("Consolas", 9))
+        dist_lbl.pack(side=tk.LEFT, padx=10)
+        
+        # Значения по слоям
+        values_frame = ttk.Frame(cursor_info_frame)
+        values_frame.pack(side=tk.RIGHT)
+        
+        layer_labels = []
         for i in range(self.deformation_analyzer.n_layers):
-            layer_name = self.deformation_analyzer.layer_names[i]
-            color = CHANNEL_COLORS[i % len(CHANNEL_COLORS)]
-            ax.plot(x, -defs[:, i], linewidth=1.5, color=color, label=layer_name)
+            lbl = ttk.Label(values_frame, text=f"—", 
+                           font=("Consolas", 9), foreground=CHANNEL_COLORS[i])
+            lbl.pack(side=tk.LEFT, padx=5)
+            layer_labels.append(lbl)
         
-        ax.set_xlabel("Путь, м")
-        ax.set_ylabel("Деформация, мм")
-        ax.set_title(f"Деформации по слоям (участок {zone_idx + 1})")
-        ax.legend(loc="upper right", fontsize=7)
-        ax.grid(True, alpha=0.3)
-        
-        fig.tight_layout()
-        
-        canvas = FigureCanvasTkAgg(fig, master=chart_frame)
-        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        tab_data["info_labels"] = {
+            "time": time_lbl,
+            "dist": dist_lbl,
+            "layers": layer_labels
+        }
         
         # Панель с пиками (скрыта по запросу)
         # peak_frame = ttk.LabelFrame(frame, text=" Пиковые значения ")
@@ -1804,10 +1887,125 @@ class DinamikaApp:
             tab_name = self.deformation_notebook.tab(
                 self.deformation_notebook.select(), "text").strip()
             if tab_name in self._deformation_tabs:
-                zone_idx, result, frame = self._deformation_tabs[tab_name]
+                data = self._deformation_tabs[tab_name]
+                zone_idx = data[0]
                 self._current_deformation_zone = zone_idx
+                # Сбрасываем заморозку при переключении вкладки
+                if len(data) > 3:
+                    tab_data = data[3]
+                    tab_data["frozen"] = False
+                    # Показываем линию на максимальном пике
+                    self._update_deformation_cursor(zone_idx, tab_data["x"][len(tab_data["x"])//2])
         except Exception:
             pass
+    
+    def _on_deformation_motion(self, event, zone_idx):
+        """Обработка движения мыши над графиком деформаций."""
+        tab_name = f"Участок {zone_idx + 1}"
+        if tab_name not in self._deformation_tabs:
+            return
+        
+        data = self._deformation_tabs[tab_name]
+        if len(data) <= 3:
+            return
+        
+        tab_data = data[3]
+        
+        # Если заморожено - не обновляем
+        if tab_data.get("frozen", False):
+            return
+        
+        # Проверяем что курсор над осями
+        if event.inaxes != tab_data["ax"] or event.xdata is None:
+            tab_data["vline"].set_visible(False)
+            tab_data["cursor_pts"].set_visible(False)
+            tab_data["canvas"].draw_idle()
+            return
+        
+        self._update_deformation_cursor(zone_idx, float(event.xdata))
+    
+    def _on_deformation_click(self, event, zone_idx):
+        """Обработка клика по графику деформаций (фиксация/разморозка курсора)."""
+        if event.button != 1:  # Только левая кнопка
+            return
+        
+        tab_name = f"Участок {zone_idx + 1}"
+        if tab_name not in self._deformation_tabs:
+            return
+        
+        data = self._deformation_tabs[tab_name]
+        if len(data) <= 3:
+            return
+        
+        tab_data = data[3]
+        
+        if event.inaxes != tab_data["ax"]:
+            return
+        
+        # Переключаем состояние заморозки
+        tab_data["frozen"] = not tab_data["frozen"]
+        
+        if tab_data["frozen"]:
+            self.status_var.set("🔒 Курсор зафиксирован")
+        else:
+            self.status_var.set("Курсор свободен")
+        
+        # Обновляем позицию если есть данные
+        if event.xdata is not None:
+            self._update_deformation_cursor(zone_idx, float(event.xdata))
+    
+    def _update_deformation_cursor(self, zone_idx, x_val):
+        """Обновление позиции курсора на графике деформаций."""
+        tab_name = f"Участок {zone_idx + 1}"
+        if tab_name not in self._deformation_tabs:
+            return
+        
+        data = self._deformation_tabs[tab_name]
+        if len(data) <= 3:
+            return
+        
+        tab_data = data[3]
+        result = data[1]
+        
+        x = tab_data["x"]
+        defs = tab_data["defs"]
+        time_arr = tab_data["time"]
+        
+        if len(x) == 0:
+            return
+        
+        # Находим ближайший индекс
+        idx = int(np.clip(np.searchsorted(x, x_val), 0, len(x) - 1))
+        
+        xv = float(x[idx])
+        vals = defs[idx, :]
+        
+        # Обновляем вертикальную линию
+        tab_data["vline"].set_xdata([xv, xv])
+        tab_data["vline"].set_visible(True)
+        
+        # Обновляем точки на кривых
+        tab_data["cursor_pts"].set_data([xv] * len(vals), vals)
+        tab_data["cursor_pts"].set_visible(True)
+        
+        # Перерисовываем график
+        tab_data["canvas"].draw_idle()
+        
+        # Обновляем панель с информацией
+        info_labels = tab_data.get("info_labels", {})
+        if info_labels:
+            time_lbl = info_labels.get("time")
+            dist_lbl = info_labels.get("dist")
+            layer_labels = info_labels.get("layers", [])
+            
+            if time_lbl:
+                time_lbl.config(text=f"Время: {time_arr[idx]:.0f} мс")
+            if dist_lbl:
+                dist_lbl.config(text=f"Расстояние: {xv:.3f} м")
+            
+            for i, lbl in enumerate(layer_labels):
+                if i < len(vals):
+                    lbl.config(text=f"{vals[i]:+.3f}")
 
     # === Peak selection methods ===
 
