@@ -3,6 +3,7 @@
 """
 import numpy as np
 import pandas as pd
+from concurrent.futures import ThreadPoolExecutor
 
 from .interpolator import Interpolator
 from .magnet_locator import MagnetLocator
@@ -506,8 +507,70 @@ class Calculator:
             self.loader._per_layer_selected_sensor[ch_name] = best_sensor
             self.loader._per_layer_all_intersections[ch_name] = best_data['x_points']
 
+    def _calc_layer_worker(self, args):
+        """Вспомогательный метод для расчёта одного слоя (для многопоточности)."""
+        dn, tugriki_vals, cal, auto_range, manual = args
+        
+        disp = cal["disp"]
+        tug_dict = cal["tug"]
+
+        if auto_range:
+            auto_left, auto_right = auto_range
+        else:
+            auto_left, auto_right = self._find_layer_overlap(disp, tug_dict)
+        
+        auto_sensor = self.loader._per_layer_selected_sensor.get(dn)
+        if not auto_sensor or auto_sensor not in tug_dict:
+            auto_sensor = list(tug_dict.keys())[0]
+
+        range_left = manual.get("range_left", auto_left)
+        range_right = manual.get("range_right", auto_right)
+        if range_left > range_right:
+            range_left, range_right = range_right, range_left
+
+        manual_sensor = manual.get("sensor")
+        if manual_sensor and manual_sensor in tug_dict:
+            selected = manual_sensor
+        elif auto_sensor in tug_dict:
+            selected = auto_sensor
+        else:
+            selected = list(tug_dict.keys())[0]
+
+        tug = tug_dict[selected]
+        cal_disp, cal_tug = Interpolator.extract_rising_branch(
+            disp, tug, range_left=range_left, range_right=range_right
+        )
+        
+        # Вычисляем значения для статистики
+        peak_idx = np.argmax(cal_disp)
+        plateau1_end = max(1, peak_idx // 3)
+        plateau1_val = float(np.mean(cal_disp[:plateau1_end])) if plateau1_end > 0 else float(cal_disp[0])
+        peak_val = float(cal_disp[peak_idx])
+        plateau2_start = min(len(cal_disp) - 1, peak_idx + (len(cal_disp) - peak_idx) * 2 // 3)
+        plateau2_val = float(np.mean(cal_disp[plateau2_start:])) if plateau2_start < len(cal_disp) else float(cal_disp[-1])
+
+        calib_info = {
+            "sensor": selected,
+            "range_left": float(range_left),
+            "range_right": float(range_right),
+            "auto_sensor": auto_sensor,
+            "auto_range_left": float(auto_left),
+            "auto_range_right": float(auto_right),
+            "manual_sensor": manual_sensor is not None,
+            "manual_range": "range_left" in manual or "range_right" in manual,
+            "magnet_x": self.loader._per_layer_magnet_x.get(dn),
+            "plateau1": plateau1_val,
+            "peak": peak_val,
+            "plateau2": plateau2_val,
+        }
+
+        # Расчёт перемещения с использованием векторизованной интерполяции
+        result_disp = Interpolator.calc_single_channel(tugriki_vals, cal_tug, cal_disp)
+        
+        return dn, np.round(result_disp, 3), calib_info
+
     def calculate_per_layer(self):
-        """Расчёт перемещений для каждого слоя."""
+        """Расчёт перемещений для каждого слоя с использованием многопоточности."""
         if not self.loader.per_layer_calib or not self.loader.dynamics_channels:
             return self.loader.result_df
 
@@ -516,80 +579,31 @@ class Calculator:
         self.loader.result_channels = {}
         self.loader._per_layer_calib_info = {}
         
-        # Шаг 1: Рассчитываем перемещения для каждого слоя с индивидуальным нулём
+        # Шаг 1: Рассчитываем перемещения для каждого слоя параллельно
         raw_results = {}
+        calib_infos = {}
+        
+        # Подготавливаем аргументы для каждого слоя
+        layer_args = []
         for dn, tugriki_vals in self.loader.dynamics_channels.items():
             if dn not in self.loader.per_layer_calib:
                 continue
             cal = self.loader.per_layer_calib[dn]
-            disp = cal["disp"]
-            tug_dict = cal["tug"]
-
             auto_range = self.loader._per_layer_auto_range.get(dn)
-            if auto_range:
-                auto_left, auto_right = auto_range
-            else:
-                auto_left, auto_right = self._find_layer_overlap(disp, tug_dict)
-            auto_sensor = self.loader._per_layer_selected_sensor.get(dn)
-            if not auto_sensor or auto_sensor not in tug_dict:
-                auto_sensor = list(tug_dict.keys())[0]
-
             manual = self.loader._per_layer_manual.get(dn, {})
-            range_left = manual.get("range_left", auto_left)
-            range_right = manual.get("range_right", auto_right)
-            if range_left > range_right:
-                range_left, range_right = range_right, range_left
-
-            manual_sensor = manual.get("sensor")
-            if manual_sensor and manual_sensor in tug_dict:
-                selected = manual_sensor
-            elif auto_sensor in tug_dict:
-                selected = auto_sensor
-            else:
-                selected = list(tug_dict.keys())[0]
-
-            tug = tug_dict[selected]
-            cal_disp, cal_tug = Interpolator.extract_rising_branch(
-                disp, tug, range_left=range_left, range_right=range_right
-            )
+            layer_args.append((dn, tugriki_vals, cal, auto_range, manual))
+        
+        # Запускаем расчёт в нескольких потоках (по одному на слой)
+        num_workers = min(len(layer_args), 6)  # Ограничиваем количество потоков
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            results = executor.map(self._calc_layer_worker, layer_args)
             
-            # Вычисляем значения для статистики: первое плато, пик, второе плато
-            # Первое плато - среднее значение до пика (в начале диапазона)
-            # Пик - максимальное значение в диапазоне калибровки
-            # Второе плато - среднее значение после пика
-            
-            # Находим индекс пика в калибровочных данных
-            peak_idx = np.argmax(cal_disp)
-            
-            # Первое плато - среднее значение в первой трети диапазона до пика
-            plateau1_end = max(1, peak_idx // 3)
-            plateau1_val = float(np.mean(cal_disp[:plateau1_end])) if plateau1_end > 0 else float(cal_disp[0])
-            
-            # Пик - максимальное значение
-            peak_val = float(cal_disp[peak_idx])
-            
-            # Второе плато - среднее значение в последней трети диапазона после пика
-            plateau2_start = min(len(cal_disp) - 1, peak_idx + (len(cal_disp) - peak_idx) * 2 // 3)
-            plateau2_val = float(np.mean(cal_disp[plateau2_start:])) if plateau2_start < len(cal_disp) else float(cal_disp[-1])
-
-            self.loader._per_layer_calib_info[dn] = {
-                "sensor": selected,
-                "range_left": float(range_left),
-                "range_right": float(range_right),
-                "auto_sensor": auto_sensor,
-                "auto_range_left": float(auto_left),
-                "auto_range_right": float(auto_right),
-                "manual_sensor": manual_sensor is not None,
-                "manual_range": "range_left" in manual or "range_right" in manual,
-                "magnet_x": self.loader._per_layer_magnet_x.get(dn),
-                "plateau1": plateau1_val,
-                "peak": peak_val,
-                "plateau2": plateau2_val,
-            }
-
-            # Расчёт перемещения с использованием интерполяции
-            result_disp = Interpolator.calc_single_channel(tugriki_vals, cal_tug, cal_disp)
-            raw_results[dn] = np.round(result_disp, 3)
+            for dn, result_disp, calib_info in results:
+                raw_results[dn] = result_disp
+                calib_infos[dn] = calib_info
+        
+        # Сохраняем информацию о калибровке
+        self.loader._per_layer_calib_info = calib_infos
         
         # Шаг 2: Сохраняем сырые результаты для графика "Перемещение от времени"
         # (без приведения к локальному нулю)
