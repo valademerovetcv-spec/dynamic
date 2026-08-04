@@ -135,16 +135,18 @@ class MagnetLocator:
             x_points = sorted(set(x_points))
 
             if len(x_points) >= 3:
+                # Оптимизированный поиск лучшей группы через sliding window O(n) вместо O(n³)
+                x_arr = np.array(x_points)
                 best_spread = float('inf')
                 best_group = []
-                for i in range(len(x_points) - 2):
-                    for j in range(i + 1, len(x_points) - 1):
-                        for k in range(j + 1, len(x_points)):
-                            group = [x_points[i], x_points[j], x_points[k]]
-                            spread = max(group) - min(group)
-                            if spread < best_spread:
-                                best_spread = spread
-                                best_group = group
+                
+                # Используем скользящее окно размером 3 - сложность O(n) вместо O(n³)
+                for i in range(len(x_arr) - 2):
+                    group = x_arr[i:i+3]
+                    spread = group[-1] - group[0]
+                    if spread < best_spread:
+                        best_spread = spread
+                        best_group = group.tolist()
 
                 sensor_data[name] = {
                     'x_points': x_points,
