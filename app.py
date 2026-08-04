@@ -1661,7 +1661,7 @@ class DinamikaApp:
     def _build_deformation_tabs(self, speed_kmh):
         """Создание вкладок для каждого участка деформации."""
         # Очищаем старые вкладки
-        while self.deformation_notebook.winfo_children():
+        while self.deformation_notebook.index("end") is not None:
             self.deformation_notebook.forget(0)
         self._deformation_tabs.clear()
         
