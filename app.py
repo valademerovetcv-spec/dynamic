@@ -16,6 +16,7 @@ import threading
 
 from calc import DataLoader
 from core.calculator import Calculator
+from core.deformation_analyzer import DeformationAnalyzer, SPEED_KMH_DEFAULT, THRESHOLD_SIGMA_DEFAULT
 
 BG = "#f0f2f5"
 FG = "#1a1a2e"
@@ -97,6 +98,7 @@ class DinamikaApp:
 
         self.loader = DataLoader()
         self.calculator = Calculator(self.loader)
+        self.deformation_analyzer = None
         self._file_path = None
         self._channel_visibility = {}
         self._dynamics_file_path = None
@@ -112,6 +114,8 @@ class DinamikaApp:
         self._calib_range_highlights = {}  # {layer: (left, right)}
         self._peak_range = None
         self._calculating = False
+        self._deformation_zones = []
+        self._current_deformation_zone = 0
 
         _style_app()
         self._build_ui()
@@ -301,6 +305,34 @@ class DinamikaApp:
 
         chart = ttk.LabelFrame(bot_paned, text=" График: Перемещение от времени ")
         bot_paned.add(chart, weight=3)
+
+        # Панель управления анализом деформаций
+        deform_ctrl_frame = ttk.Frame(chart)
+        deform_ctrl_frame.pack(side=tk.TOP, fill=tk.X, padx=4, pady=(4, 0))
+        
+        self.analyze_deform_btn = ttk.Button(deform_ctrl_frame, text="🔍 Анализировать деформации",
+                                              style="Toolbar.TButton",
+                                              command=self._analyze_deformations)
+        self.analyze_deform_btn.pack(side=tk.LEFT, padx=2)
+        
+        ttk.Label(deform_ctrl_frame, text="Скорость, км/ч:").pack(side=tk.LEFT, padx=(15, 5))
+        self.deform_speed_var = tk.StringVar(value=str(SPEED_KMH_DEFAULT))
+        self.deform_speed_entry = ttk.Entry(deform_ctrl_frame, textvariable=self.deform_speed_var, width=8)
+        self.deform_speed_entry.pack(side=tk.LEFT)
+        
+        ttk.Label(deform_ctrl_frame, text="Порог, σ:").pack(side=tk.LEFT, padx=(15, 5))
+        self.deform_threshold_var = tk.StringVar(value=str(THRESHOLD_SIGMA_DEFAULT))
+        self.deform_threshold_entry = ttk.Entry(deform_ctrl_frame, textvariable=self.deform_threshold_var, width=8)
+        self.deform_threshold_entry.pack(side=tk.LEFT)
+        
+        self.deform_status_label = ttk.Label(deform_ctrl_frame, text="", style="Info.TLabel")
+        self.deform_status_label.pack(side=tk.LEFT, padx=15)
+        
+        # Notebook для вкладок участков деформаций
+        self.deformation_notebook = ttk.Notebook(chart)
+        self.deformation_notebook.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        self._deformation_tabs = {}
+        self.deformation_notebook.bind("<<NotebookTabChanged>>", self._on_deformation_tab_changed)
 
         self.result_fig = Figure(figsize=(7, 4), dpi=100)
         self.result_ax = self.result_fig.add_subplot(111)
@@ -1537,6 +1569,192 @@ class DinamikaApp:
 
     def _on_result_leave(self, event):
         self.result_canvas.get_tk_widget().delete("crosshair")
+
+    # === Deformation analysis methods ===
+
+    def _analyze_deformations(self):
+        """Анализ послойных деформаций с использованием данных перемещения от времени."""
+        if not self.loader.result_channels or self.loader.dynamics_time is None:
+            messagebox.showinfo("Информация", 
+                "Сначала загрузите данные динамики и тарировки,\n"
+                "затем выполните расчёт для получения данных перемещения.")
+            return
+        
+        try:
+            speed_kmh = float(self.deform_speed_var.get())
+            threshold_sigma = float(self.deform_threshold_var.get())
+        except ValueError:
+            messagebox.showerror("Ошибка", "Неверный формат скорости или порога")
+            return
+        
+        # Подготовка данных: время и перемещения по слоям
+        time_ms = self.loader.dynamics_time
+        layer_names = list(self.loader.result_channels.keys())
+        
+        # Собираем данные по слоям в массив
+        data_list = []
+        for ch_name in layer_names:
+            ch_data = self.loader.result_channels[ch_name]
+            data_list.append(ch_data)
+        
+        data = np.column_stack(data_list)
+        
+        # Создание анализатора
+        self.deformation_analyzer = DeformationAnalyzer(time_ms, data, layer_names)
+        
+        # Поиск участков деформаций
+        zones = self.deformation_analyzer.find_zones(threshold_sigma=threshold_sigma)
+        self._deformation_zones = zones
+        
+        if not zones:
+            self.deform_status_label.configure(text="Участки деформаций не найдены")
+            messagebox.showinfo("Результат", "Участки деформаций не найдены.\n"
+                               "Попробуйте уменьшить порог σ.")
+            return
+        
+        # Создание вкладок для каждого участка
+        self._build_deformation_tabs(speed_kmh)
+        
+        self.deform_status_label.configure(
+            text=f"Найдено участков: {len(zones)}")
+        self.status_var.set(f"Анализ деформаций завершён: {len(zones)} участков")
+
+    def _build_deformation_tabs(self, speed_kmh):
+        """Создание вкладок для каждого участка деформации."""
+        # Очищаем старые вкладки
+        for tab in list(self._deformation_tabs.keys()):
+            self.deformation_notebook.forget(tab)
+        self._deformation_tabs.clear()
+        
+        if not self._deformation_zones:
+            default_frame = ttk.Frame(self.deformation_notebook)
+            self.deformation_notebook.add(default_frame, text="  Нет данных  ")
+            lbl = ttk.Label(default_frame, text="Нет данных для отображения",
+                           background=PANEL_BG, foreground="#94a3b8",
+                           font=("Segoe UI", 10, "italic"))
+            lbl.pack(expand=True)
+            self._deformation_tabs["Нет данных"] = default_frame
+            return
+        
+        # Создаем вкладки для каждого участка
+        for i, zone_idx in enumerate(range(len(self._deformation_zones))):
+            frame = ttk.Frame(self.deformation_notebook)
+            tab_name = f"Участок {i + 1}"
+            self.deformation_notebook.add(frame, text=f"  {tab_name}  ")
+            
+            # Вычисляем результаты для участка
+            result = self.deformation_analyzer.zone_result(zone_idx, speed_kmh)
+            self._deformation_tabs[tab_name] = (zone_idx, result, frame)
+            
+            # Добавляем информацию об участке
+            self._populate_deformation_tab(frame, result, zone_idx, speed_kmh)
+        
+        # Выбираем первую вкладку
+        if self._deformation_zones:
+            first_result = self.deformation_analyzer.zone_result(0, speed_kmh)
+            self._current_deformation_zone = 0
+
+    def _populate_deformation_tab(self, frame, result, zone_idx, speed_kmh):
+        """Заполнение вкладки данными об участке."""
+        # Верхняя панель с информацией
+        info_frame = ttk.Frame(frame)
+        info_frame.pack(fill=tk.X, padx=4, pady=4)
+        
+        info_text = (
+            f"Участок {zone_idx + 1}\n"
+            f"Время: {result['t_start']:.2f} — {result['t_end']:.2f} мс\n"
+            f"Длительность: {result['duration_ms']:.2f} мс\n"
+            f"Путь: {result['x_start']:.3f} — {result['x_end']:.3f} м\n"
+            f"Макс. слой: {self.deformation_analyzer.layer_names[result['largest_layer']]}\n"
+            f"Макс. значение: {result['largest_value']:.4f} мм"
+        )
+        
+        info_label = ttk.Label(info_frame, text=info_text, 
+                               font=("Consolas", 9), justify=tk.LEFT)
+        info_label.pack(side=tk.LEFT, padx=4, pady=4)
+        
+        # Правая панель со значениями ΔY
+        delta_frame = ttk.LabelFrame(info_frame, text=" ΔY между слоями ")
+        delta_frame.pack(side=tk.RIGHT, padx=4, pady=4)
+        
+        delta_texts = []
+        for i in range(len(result['delta_y_at_largest'])):
+            layer1 = self.deformation_analyzer.layer_names[i]
+            layer2 = self.deformation_analyzer.layer_names[i + 1]
+            delta = result['delta_y_at_largest'][i]
+            delta_texts.append(f"{layer1}→{layer2}: {delta:+.4f} мм")
+        
+        delta_label = ttk.Label(delta_frame, text="\n".join(delta_texts),
+                                font=("Consolas", 9), justify=tk.LEFT)
+        delta_label.pack(padx=4, pady=4)
+        
+        # График деформаций
+        chart_frame = ttk.Frame(frame)
+        chart_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        
+        fig = Figure(figsize=(6, 3), dpi=100)
+        ax = fig.add_subplot(111)
+        
+        x = result['x']
+        defs = result['defs']
+        
+        # Построение графиков для каждого слоя
+        for i in range(self.deformation_analyzer.n_layers):
+            layer_name = self.deformation_analyzer.layer_names[i]
+            color = CHANNEL_COLORS[i % len(CHANNEL_COLORS)]
+            ax.plot(x, defs[:, i], linewidth=1.5, color=color, label=layer_name)
+        
+        ax.set_xlabel("Путь, м")
+        ax.set_ylabel("Деформация, мм")
+        ax.set_title(f"Деформации по слоям (участок {zone_idx + 1})")
+        ax.legend(loc="upper right", fontsize=7)
+        ax.grid(True, alpha=0.3)
+        
+        fig.tight_layout()
+        
+        canvas = FigureCanvasTkAgg(fig, master=chart_frame)
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # Панель с пиками
+        peak_frame = ttk.LabelFrame(frame, text=" Пиковые значения ")
+        peak_frame.pack(fill=tk.X, padx=4, pady=4)
+        
+        peak_info = []
+        for i in range(self.deformation_analyzer.n_layers):
+            layer_name = self.deformation_analyzer.layer_names[i]
+            peak_val = result['peak_vals'][i]
+            peak_t = result['peak_time'][i]
+            peak_x = result['peak_x'][i]
+            peak_info.append(f"{layer_name}: {peak_val:+.4f} мм @ {peak_t:.1f} мс ({peak_x:.3f} м)")
+        
+        peak_label = ttk.Label(peak_frame, text="  |  ".join(peak_info),
+                               font=("Consolas", 8))
+        peak_label.pack(padx=4, pady=4)
+        
+        # Информация о временах пиков для расчёта скорости
+        if result['first_two_peak_times'][0] is not None:
+            t1 = result['first_two_peak_times'][0]
+            t2 = result['first_two_peak_times'][1]
+            if t2 is not None:
+                axis_distance = 0.5  # м (можно вынести в настройки)
+                dt = t2 - t1  # мс
+                if dt > 0:
+                    calc_speed = axis_distance / (dt / 1000.0) * 3.6  # км/ч
+                    speed_info = f"Δt между пиками: {dt:.1f} мс → V={calc_speed:.1f} км/ч"
+                    speed_label = ttk.Label(peak_frame, text=speed_info,
+                                           font=("Consolas", 8), foreground="#059669")
+                    speed_label.pack(padx=4, pady=2)
+
+    def _on_deformation_tab_changed(self, event):
+        """Обработчик переключения вкладок участков деформации."""
+        try:
+            tab_name = self.deformation_notebook.tab(
+                self.deformation_notebook.select(), "text").strip()
+            if tab_name in self._deformation_tabs:
+                zone_idx, result, frame = self._deformation_tabs[tab_name]
+                self._current_deformation_zone = zone_idx
+        except Exception:
+            pass
 
     # === Peak selection methods ===
 
