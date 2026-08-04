@@ -485,12 +485,12 @@ class Calculator:
             x_points = sorted(set(x_points))
 
             if len(x_points) >= 3:
-                # Оптимизированный поиск лучшей группы через sliding window
+                # Оптимизированный поиск лучшей группы через sliding window O(n) вместо O(n³)
                 x_arr = np.array(x_points)
                 best_spread = float('inf')
                 best_group = []
                 
-                # Используем скользящее окно размером 3
+                # Используем скользящее окно размером 3 - сложность O(n) вместо O(n³)
                 for i in range(len(x_arr) - 2):
                     group = x_arr[i:i+3]
                     spread = group[-1] - group[0]
@@ -581,8 +581,8 @@ class Calculator:
             "plateau2": plateau2_val,
         }
 
-        # Расчёт перемещения с использованием векторизованной интерполяции
-        result_disp = Interpolator.calc_single_channel(tugriki_vals, cal_tug, cal_disp)
+        # Расчёт перемещения с использованием оптимизированной векторизованной интерполяции
+        result_disp = Interpolator.calc_single_channel_optimized(tugriki_vals, cal_tug, cal_disp)
         
         return dn, np.round(result_disp, 3), calib_info
 

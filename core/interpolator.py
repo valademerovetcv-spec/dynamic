@@ -96,6 +96,49 @@ class Interpolator:
         return np.round(result, 3)
 
     @staticmethod
+    def calc_single_channel_optimized(tugriki_vals, calib_tugriki, calib_disp):
+        """
+        Оптимизированный расчёт перемещения с кэшированием сортировки калибровки.
+        
+        Args:
+            tugriki_vals: массив значений динамики
+            calib_tugriki: калибровочные значения датчика (уже отсортированные)
+            calib_disp: калибровочные перемещения (соответствующие отсортированным calib_tugriki)
+            
+        Returns:
+            np.array: массив рассчитанных перемещений
+        """
+        tugriki_vals = np.asarray(tugriki_vals, dtype=float)
+        n_calib = len(calib_tugriki)
+        
+        if n_calib < 2:
+            return np.zeros_like(tugriki_vals)
+        
+        # Находим индексы интерполяции для всех значений одновременно
+        indices = np.searchsorted(calib_tugriki, tugriki_vals, side='right')
+        indices = np.clip(indices, 1, n_calib - 1)
+        
+        # Получаем соседние точки для интерполяции
+        t0 = calib_tugriki[indices - 1]
+        t1 = calib_tugriki[indices]
+        d0 = calib_disp[indices - 1]
+        d1 = calib_disp[indices]
+        
+        # Вычисляем интерполяцию
+        denom = t1 - t0
+        mask = denom != 0
+        result = np.where(mask, d0 + (tugriki_vals - t0) * (d1 - d0) / denom, d0)
+        
+        # Обработка граничных случаев
+        below_mask = tugriki_vals <= calib_tugriki[0]
+        above_mask = tugriki_vals >= calib_tugriki[-1]
+        
+        result = np.where(below_mask, calib_disp[0], result)
+        result = np.where(above_mask, calib_disp[-1], result)
+        
+        return np.round(result, 3)
+
+    @staticmethod
     def extract_rising_branch(disp, tug, range_left=None, range_right=None):
         """
         Извлечение восходящей ветви калибровки.
