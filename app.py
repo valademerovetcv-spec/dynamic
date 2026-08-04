@@ -172,6 +172,12 @@ class DinamikaApp:
         ttk.Button(tb, text="Температуры (CSV/XLSX)", style="ToolbarCsv.TButton",
                    command=self.load_temperature).pack(side=tk.LEFT, padx=3, pady=6)
 
+        ttk.Separator(tb, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6, pady=6)
+
+        self.analyze_deform_btn = ttk.Button(tb, text="🔍 Анализ деформаций", style="Toolbar.TButton",
+                                              command=self._analyze_deformations)
+        self.analyze_deform_btn.pack(side=tk.LEFT, padx=3, pady=6)
+
         self.file_label = ttk.Label(tb, text="Файл не загружен", style="Header.TLabel")
         self.file_label.pack(side=tk.RIGHT, padx=15)
 
@@ -354,14 +360,9 @@ class DinamikaApp:
         self.deform_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         deform_vsb.pack(side=tk.RIGHT, fill=tk.Y)
         
-        # Панель управления анализом деформаций
+        # Панель управления анализом деформаций (скрыта, кнопка вынесена в toolbar)
         deform_ctrl_frame = ttk.Frame(self.deform_inner)
         deform_ctrl_frame.pack(side=tk.TOP, fill=tk.X, padx=4, pady=(4, 0))
-        
-        self.analyze_deform_btn = ttk.Button(deform_ctrl_frame, text="🔍 Анализировать деформации",
-                                              style="Toolbar.TButton",
-                                              command=self._analyze_deformations)
-        self.analyze_deform_btn.pack(side=tk.LEFT, padx=2)
         
         ttk.Label(deform_ctrl_frame, text="Скорость, км/ч:").pack(side=tk.LEFT, padx=(15, 5))
         self.deform_speed_var = tk.StringVar(value=str(SPEED_KMH_DEFAULT))
