@@ -1579,7 +1579,14 @@ class DinamikaApp:
 
     def _analyze_deformations(self):
         """Анализ послойных деформаций с использованием данных перемещения от времени."""
-        if not self.loader.result_channels or self.loader.dynamics_time is None:
+        # Проверяем наличие данных: используем result_channels_raw или result_channels
+        has_data = False
+        if hasattr(self.loader, 'result_channels_raw') and self.loader.result_channels_raw:
+            has_data = True
+        elif self.loader.result_channels:
+            has_data = True
+            
+        if not has_data or self.loader.dynamics_time is None:
             messagebox.showinfo("Информация", 
                 "Сначала загрузите данные динамики и тарировки,\n"
                 "затем выполните расчёт для получения данных перемещения.")
@@ -1594,12 +1601,19 @@ class DinamikaApp:
         
         # Подготовка данных: время и перемещения по слоям
         time_ms = self.loader.dynamics_time
-        layer_names = list(self.loader.result_channels.keys())
+        
+        # Используем result_channels_raw если есть, иначе result_channels
+        if hasattr(self.loader, 'result_channels_raw') and self.loader.result_channels_raw:
+            channels_data = self.loader.result_channels_raw
+        else:
+            channels_data = self.loader.result_channels
+            
+        layer_names = list(channels_data.keys())
         
         # Собираем данные по слоям в массив
         data_list = []
         for ch_name in layer_names:
-            ch_data = self.loader.result_channels[ch_name]
+            ch_data = channels_data[ch_name]
             data_list.append(ch_data)
         
         data = np.column_stack(data_list)
