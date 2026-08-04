@@ -13,6 +13,7 @@ from matplotlib import rcParams
 import matplotlib.dates as mdates
 from pathlib import Path
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from calc import DataLoader
 from core.calculator import Calculator
@@ -116,9 +117,120 @@ class DinamikaApp:
         self._calculating = False
         self._deformation_zones = []
         self._current_deformation_zone = 0
+        
+        # Хранилище для toast-уведомлений
+        self._toasts = []
+        self._toast_counter = 0
 
         _style_app()
         self._build_ui()
+    
+    def _show_toast(self, title, message, progress=0, duration_ms=3000):
+        """Показывает toast-уведомление в правом нижнем углу."""
+        self._toast_counter += 1
+        toast_id = self._toast_counter
+        
+        # Создаём окно toast
+        toast = tk.Toplevel(self.root)
+        toast.overrideredirect(True)
+        toast.attributes('-topmost', True)
+        
+        # Стили toast
+        toast_bg = "#1a1a2e"
+        toast_fg = "#ffffff"
+        accent = "#2563eb"
+        
+        # Размеры
+        width = 320
+        height = 80
+        padding = 10
+        
+        # Позиция (правый нижний угол с отступом)
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        
+        # Вычисляем позицию для нового toast (стек снизу вверх)
+        base_y = screen_height - height - 20
+        offset = len(self._toasts) * (height + 10)
+        x = screen_width - width - 20
+        y = base_y - offset
+        
+        toast.geometry(f"{width}x{height}+{x}+{y}")
+        toast.configure(bg=toast_bg)
+        
+        # Контейнер
+        container = ttk.Frame(toast, style="TFrame")
+        container.pack(fill=tk.BOTH, expand=True, padx=padding, pady=padding)
+        
+        # Заголовок
+        title_label = ttk.Label(container, text=title, font=("Segoe UI", 9, "bold"), 
+                                background=toast_bg, foreground=accent)
+        title_label.pack(anchor=tk.W)
+        
+        # Сообщение
+        msg_label = ttk.Label(container, text=message, font=("Segoe UI", 8),
+                              background=toast_bg, foreground=toast_fg, wraplength=width - 40)
+        msg_label.pack(anchor=tk.W, pady=(2, 4))
+        
+        # Progressbar
+        if progress >= 0:
+            progress_var = tk.IntVar(value=int(progress))
+            progress_bar = ttk.Progressbar(container, variable=progress_var, 
+                                           maximum=100, mode='determinate', length=width - 40)
+            progress_bar.pack(fill=tk.X)
+        else:
+            progress_var = None
+            progress_bar = None
+        
+        # Сохраняем ссылку на toast
+        toast_data = {
+            'id': toast_id,
+            'window': toast,
+            'progress_var': progress_var,
+            'progress_bar': progress_bar,
+        }
+        self._toasts.append(toast_data)
+        
+        # Автозакрытие через duration_ms
+        if duration_ms > 0:
+            self.root.after(duration_ms, lambda: self._close_toast(toast_id))
+        
+        return toast_id
+    
+    def _update_toast_progress(self, toast_id, progress):
+        """Обновляет прогресс toast-уведомления."""
+        for toast_data in self._toasts:
+            if toast_data['id'] == toast_id and toast_data['progress_var'] is not None:
+                toast_data['progress_var'].set(int(progress))
+                break
+    
+    def _close_toast(self, toast_id):
+        """Закрывает toast-уведомление."""
+        for i, toast_data in enumerate(self._toasts):
+            if toast_data['id'] == toast_id:
+                try:
+                    toast_data['window'].destroy()
+                except:
+                    pass
+                self._toasts.pop(i)
+                
+                # Пересчитываем позиции оставшихся toast
+                self._reposition_toasts()
+                break
+    
+    def _reposition_toasts(self):
+        """Пересчитывает позиции всех toast-уведомлений."""
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        width = 320
+        height = 80
+        base_y = screen_height - height - 20
+        
+        for i, toast_data in enumerate(self._toasts):
+            offset = i * (height + 10)
+            x = screen_width - width - 20
+            y = base_y - offset
+            toast_data['window'].geometry(f"{width}x{height}+{x}+{y}")
 
     def _build_ui(self):
         self._build_menu()
@@ -1460,7 +1572,7 @@ class DinamikaApp:
         
         # Запускаем вычисления в фоновом потоке для неблокирующего UI
         import threading
-        from concurrent.futures import ThreadPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         
         num_layers = len(self.loader.per_layer_calib) if hasattr(self.loader, 'per_layer_calib') and self.loader.per_layer_calib else 0
         
@@ -1468,12 +1580,27 @@ class DinamikaApp:
         self.calc_progress_var.set(0)
         self.calc_progress_label.configure(text="")
         
+        # Показываем toast о начале расчета
+        main_toast_id = None
+        if has_per_layer and num_layers > 0:
+            main_toast_id = self._show_toast(
+                "Расчет перемещений",
+                f"Запуск расчета для {num_layers} слоёв...",
+                progress=0,
+                duration_ms=0  # Не закрывать автоматически
+            )
+        
         def do_calculate():
             try:
                 if has_per_layer:
                     # Расчёт магнита и перемещений уже выполняется в отдельных потоках внутри Calculator
+                    # Добавляем callback для обновления прогресса по слоям
                     self.loader.calculate_per_layer_magnet()
-                    self.loader.calculate_per_layer()
+                    self.loader.calculate_per_layer_with_progress(
+                        progress_callback=lambda layer, total: self._update_layer_progress(
+                            main_toast_id, layer, total
+                        )
+                    )
                 else:
                     self.loader.calculate()
                 return True
@@ -1482,6 +1609,11 @@ class DinamikaApp:
         
         def on_complete(result):
             try:
+                # Обновляем toast о завершении
+                if main_toast_id is not None:
+                    self._update_toast_progress(main_toast_id, 100)
+                    self.root.after(1000, lambda: self._close_toast(main_toast_id))
+                
                 # Скрываем прогрессбар после завершения
                 self.calc_progress_var.set(100)
                 self.calc_progress_label.configure(text="")
@@ -1518,6 +1650,8 @@ class DinamikaApp:
                 self.status_var.set("Ошибка расчёта")
                 self.calc_progress_var.set(0)
                 self.calc_progress_label.configure(text="")
+                if main_toast_id is not None:
+                    self._close_toast(main_toast_id)
             finally:
                 self._calculating = False
         
@@ -1527,6 +1661,8 @@ class DinamikaApp:
             self._calculating = False
             self.calc_progress_var.set(0)
             self.calc_progress_label.configure(text="")
+            if main_toast_id is not None:
+                self._close_toast(main_toast_id)
         
         def task_wrapper():
             try:
@@ -1537,6 +1673,15 @@ class DinamikaApp:
         
         thread = threading.Thread(target=task_wrapper, daemon=True)
         thread.start()
+    
+    def _update_layer_progress(self, toast_id, completed_layer, total_layers):
+        """Обновляет прогресс toast при завершении расчета слоя."""
+        if toast_id is None:
+            return
+        progress = int((completed_layer / total_layers) * 100) if total_layers > 0 else 0
+        self._update_toast_progress(toast_id, progress)
+        self.calc_progress_label.configure(text=f"Слой {completed_layer}/{total_layers}")
+        self.calc_progress_var.set(progress)
 
     def _draw_result_chart(self):
         self.result_ax.clear()
