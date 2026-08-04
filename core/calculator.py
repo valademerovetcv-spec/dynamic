@@ -402,110 +402,127 @@ class Calculator:
         return self.loader.result_df
 
     def calculate_per_layer_magnet(self):
-        """Расчёт положения магнита для каждого слоя."""
+        """Расчёт положения магнита для каждого слоя с использованием многопоточности."""
+        from concurrent.futures import ThreadPoolExecutor
+        
         self.loader._per_layer_magnet_x = {}
         self.loader._per_layer_all_intersections = {}
         self.loader._per_layer_selected_sensor = {}
 
+        # Подготавливаем аргументы для каждого слоя
+        layer_args = []
         for ch_name, cal in self.loader.per_layer_calib.items():
-            disp = cal["disp"]
-            tug_dict = cal["tug"]
-            tug_names = list(tug_dict.keys())
-            tug_list = list(tug_dict.values())
+            layer_args.append((ch_name, cal))
+        
+        # Запускаем расчёт в нескольких потоках
+        num_workers = min(len(layer_args), 6)
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            results = executor.map(self._calc_magnet_worker, layer_args)
+            
+            for ch_name, magnet_x, selected_sensor, intersections in results:
+                self.loader._per_layer_magnet_x[ch_name] = float(magnet_x)
+                self.loader._per_layer_selected_sensor[ch_name] = selected_sensor
+                self.loader._per_layer_all_intersections[ch_name] = intersections
 
-            if len(tug_list) < 2:
-                continue
+    def _calc_magnet_worker(self, args):
+        """Вспомогательный метод для расчёта магнита одного слоя (для многопоточности)."""
+        ch_name, cal = args
+        disp = cal["disp"]
+        tug_dict = cal["tug"]
+        tug_names = list(tug_dict.keys())
+        tug_list = list(tug_dict.values())
 
-            ranges = []
+        if len(tug_list) < 2:
+            return ch_name, 0.0, None, []
+
+        ranges = []
+        for tug_vals in tug_list:
+            min_idx = int(np.argmin(tug_vals))
+            peak_idx = int(np.argmax(tug_vals))
+            left = float(disp[min_idx])
+            right = float(disp[peak_idx])
+            if left > right:
+                left, right = right, left
+            ranges.append((left, right))
+
+        overlap_left = max(r[0] for r in ranges)
+        overlap_right = min(r[1] for r in ranges)
+
+        if overlap_left >= overlap_right:
+            narrowest = min(ranges, key=lambda r: r[1] - r[0])
+            overlap_left = narrowest[0]
+            overlap_right = narrowest[1]
+
+        center_disp = [
+            overlap_left + (overlap_right - overlap_left) * 0.25,
+            overlap_left + (overlap_right - overlap_left) * 0.50,
+            overlap_left + (overlap_right - overlap_left) * 0.75,
+        ]
+
+        levels = []
+        for cd in center_disp:
+            idx = int(np.argmin(np.abs(disp - cd)))
             for tug_vals in tug_list:
-                min_idx = int(np.argmin(tug_vals))
-                peak_idx = int(np.argmax(tug_vals))
-                left = float(disp[min_idx])
-                right = float(disp[peak_idx])
-                if left > right:
-                    left, right = right, left
-                ranges.append((left, right))
+                levels.append(float(tug_vals[idx]))
 
-            overlap_left = max(r[0] for r in ranges)
-            overlap_right = min(r[1] for r in ranges)
+        sensor_data = {}
+        for s_name, tug_vals in zip(tug_names, tug_list):
+            x_points = []
+            for level in levels:
+                # Векторизованный поиск пересечений
+                diff = tug_vals - level
+                sign_changes = np.where(diff[:-1] * diff[1:] < 0)[0]
+                
+                for i in sign_changes:
+                    x0, x1 = disp[i], disp[i + 1]
+                    y0, y1 = tug_vals[i], tug_vals[i + 1]
+                    if y1 != y0:
+                        t = (level - y0) / (y1 - y0)
+                        x_cross = x0 + t * (x1 - x0)
+                        if overlap_left <= x_cross <= overlap_right:
+                            x_points.append(float(x_cross))
 
-            if overlap_left >= overlap_right:
-                narrowest = min(ranges, key=lambda r: r[1] - r[0])
-                overlap_left = narrowest[0]
-                overlap_right = narrowest[1]
+            x_points = sorted(set(x_points))
 
-            center_disp = [
-                overlap_left + (overlap_right - overlap_left) * 0.25,
-                overlap_left + (overlap_right - overlap_left) * 0.50,
-                overlap_left + (overlap_right - overlap_left) * 0.75,
-            ]
+            if len(x_points) >= 3:
+                # Оптимизированный поиск лучшей группы через sliding window
+                x_arr = np.array(x_points)
+                best_spread = float('inf')
+                best_group = []
+                
+                # Используем скользящее окно размером 3
+                for i in range(len(x_arr) - 2):
+                    group = x_arr[i:i+3]
+                    spread = group[-1] - group[0]
+                    if spread < best_spread:
+                        best_spread = spread
+                        best_group = group.tolist()
 
-            levels = []
-            for cd in center_disp:
-                idx = int(np.argmin(np.abs(disp - cd)))
-                for tug_vals in tug_list:
-                    levels.append(float(tug_vals[idx]))
-
-            sensor_data = {}
-            for s_name, tug_vals in zip(tug_names, tug_list):
-                x_points = []
-                for level in levels:
-                    # Векторизованный поиск пересечений
-                    diff = tug_vals - level
-                    sign_changes = np.where(diff[:-1] * diff[1:] < 0)[0]
-                    
-                    for i in sign_changes:
-                        x0, x1 = disp[i], disp[i + 1]
-                        y0, y1 = tug_vals[i], tug_vals[i + 1]
-                        if y1 != y0:
-                            t = (level - y0) / (y1 - y0)
-                            x_cross = x0 + t * (x1 - x0)
-                            if overlap_left <= x_cross <= overlap_right:
-                                x_points.append(float(x_cross))
-
-                x_points = sorted(set(x_points))
-
-                if len(x_points) >= 3:
-                    # Оптимизированный поиск лучшей группы через sliding window
-                    x_arr = np.array(x_points)
-                    best_spread = float('inf')
-                    best_group = []
-                    
-                    # Используем скользящее окно размером 3
-                    for i in range(len(x_arr) - 2):
-                        group = x_arr[i:i+3]
-                        spread = group[-1] - group[0]
-                        if spread < best_spread:
-                            best_spread = spread
-                            best_group = group.tolist()
-
-                    sensor_data[s_name] = {
-                        'x_points': x_points,
-                        'best_group': best_group,
-                        'spread': best_spread,
-                        'count': len(x_points),
-                    }
-                else:
-                    sensor_data[s_name] = {
-                        'x_points': x_points,
-                        'best_group': x_points,
-                        'spread': float('inf'),
-                        'count': len(x_points),
-                    }
-
-            best_sensor = min(sensor_data.items(), key=lambda x: x[1]['spread'])[0]
-            best_data = sensor_data[best_sensor]
-
-            if len(best_data['best_group']) >= 2:
-                magnet_x = (min(best_data['best_group']) + max(best_data['best_group'])) / 2
-            elif len(best_data['x_points']) >= 2:
-                magnet_x = (min(best_data['x_points']) + max(best_data['x_points'])) / 2
+                sensor_data[s_name] = {
+                    'x_points': x_points,
+                    'best_group': best_group,
+                    'spread': best_spread,
+                    'count': len(x_points),
+                }
             else:
-                magnet_x = (overlap_left + overlap_right) / 2
+                sensor_data[s_name] = {
+                    'x_points': x_points,
+                    'best_group': x_points,
+                    'spread': float('inf'),
+                    'count': len(x_points),
+                }
 
-            self.loader._per_layer_magnet_x[ch_name] = float(magnet_x)
-            self.loader._per_layer_selected_sensor[ch_name] = best_sensor
-            self.loader._per_layer_all_intersections[ch_name] = best_data['x_points']
+        best_sensor = min(sensor_data.items(), key=lambda x: x[1]['spread'])[0]
+        best_data = sensor_data[best_sensor]
+
+        if len(best_data['best_group']) >= 2:
+            magnet_x = (min(best_data['best_group']) + max(best_data['best_group'])) / 2
+        elif len(best_data['x_points']) >= 2:
+            magnet_x = (min(best_data['x_points']) + max(best_data['x_points'])) / 2
+        else:
+            magnet_x = (overlap_left + overlap_right) / 2
+
+        return ch_name, magnet_x, best_sensor, best_data['x_points']
 
     def _calc_layer_worker(self, args):
         """Вспомогательный метод для расчёта одного слоя (для многопоточности)."""

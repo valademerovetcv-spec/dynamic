@@ -1449,14 +1449,17 @@ class DinamikaApp:
             return
 
         self._calculating = True
-        self.status_var.set("Выполнение расчёта...")
         
         # Запускаем вычисления в фоновом потоке для неблокирующего UI
         import threading
+        from concurrent.futures import ThreadPoolExecutor
+        
+        num_layers = len(self.loader.per_layer_calib) if hasattr(self.loader, 'per_layer_calib') and self.loader.per_layer_calib else 0
         
         def do_calculate():
             try:
                 if has_per_layer:
+                    # Расчёт магнита и перемещений уже выполняется в отдельных потоках внутри Calculator
                     self.loader.calculate_per_layer_magnet()
                     self.loader.calculate_per_layer()
                 else:
@@ -2303,11 +2306,15 @@ class DinamikaApp:
                         color_idx += 1
                     info = self.loader._per_layer_calib_info.get(ch_name)
                     if info:
-                        self.disp_ax.axvline(info["range_left"], color="#ef4444",
-                                             linewidth=1.0, linestyle="--", alpha=0.6)
-                        self.disp_ax.axvline(info["range_right"], color="#ef4444",
-                                             linewidth=1.0, linestyle="--", alpha=0.6)
-                    visible_any = True
+                        r_left = info.get("range_left")
+                        r_right = info.get("range_right")
+                        if r_left is not None:
+                            self.disp_ax.axvline(r_left, color="#ef4444",
+                                                 linewidth=1.0, linestyle="--", alpha=0.6)
+                        if r_right is not None:
+                            self.disp_ax.axvline(r_right, color="#ef4444",
+                                                 linewidth=1.0, linestyle="--", alpha=0.6)
+                        visible_any = True
             if visible_any:
                 self.disp_ax.legend(loc="upper right", fontsize=7)
             self.disp_ax.set_xlabel("мм")
@@ -2325,10 +2332,14 @@ class DinamikaApp:
                     visible_any = True
             info = self.loader._global_calib_info
             if info:
-                self.disp_ax.axvline(info["range_left"], color="#ef4444",
-                                     linewidth=1.0, linestyle="--", alpha=0.6)
-                self.disp_ax.axvline(info["range_right"], color="#ef4444",
-                                     linewidth=1.0, linestyle="--", alpha=0.6)
+                r_left = info.get("range_left")
+                r_right = info.get("range_right")
+                if r_left is not None:
+                    self.disp_ax.axvline(r_left, color="#ef4444",
+                                         linewidth=1.0, linestyle="--", alpha=0.6)
+                if r_right is not None:
+                    self.disp_ax.axvline(r_right, color="#ef4444",
+                                         linewidth=1.0, linestyle="--", alpha=0.6)
             elif self.loader._overlap_range:
                 rl, rr = self.loader._overlap_range
                 self.disp_ax.axvline(rl, color="#ef4444", linewidth=1.0, linestyle="--", alpha=0.6)
