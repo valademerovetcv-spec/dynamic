@@ -371,6 +371,9 @@ class Calculator:
                 result_disp[j] = d if d is not None else 0.0
             self.loader.result_channels[dn] = np.round(result_disp, 3)
 
+        # Сохраняем сырые результаты для графика "Перемещение от времени" и анализа деформаций
+        self.loader.result_channels_raw = self.loader.result_channels.copy()
+
         if self.loader.result_channels:
             self._update_zero_and_baselines()
             key = list(self.loader.result_channels.keys())[0]
