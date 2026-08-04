@@ -324,11 +324,22 @@ class XLSXLoader:
         if not hasattr(self, 'per_layer_calib') or self.per_layer_calib is None:
             self.per_layer_calib = {}
         
+        # Инициализируем словарь для информации о калибровке
+        if not hasattr(self, '_per_layer_calib_info') or self._per_layer_calib_info is None:
+            self._per_layer_calib_info = {}
+        
+        # Быстрая загрузка файла
         if path.lower().endswith('.xlsx'):
+            # Используем pandas с оптимизациями для xlsx
             df = pd.read_excel(path, header=None, dtype=float)
         else:
+            # Для CSV используем быстрое чтение
             df = pd.read_csv(path, sep=";", header=None, decimal=",", dtype=float)
+        
+        # Сортируем и сбрасываем индекс
         df = df.sort_values(by=0).reset_index(drop=True)
+        
+        # Извлекаем данные
         disp_col = np.round(df.iloc[:, 0].to_numpy(dtype=float), 3)
         tug_cols = {}
         for i in range(1, df.shape[1]):
@@ -336,4 +347,21 @@ class XLSXLoader:
             vals = np.round(df.iloc[:, i].to_numpy(dtype=float), 3)
             if not np.all(vals == 0):
                 tug_cols[col_name] = vals
+        
+        # Сохраняем данные
         self.per_layer_calib[layer_name] = {"disp": disp_col, "tug": tug_cols}
+        
+        # Сохраняем информацию о загруженной калибровке для быстрого доступа
+        sensor_names = list(tug_cols.keys())
+        if sensor_names:
+            self._per_layer_calib_info[layer_name] = {
+                "sensor": sensor_names[0],
+                "range_left": None,  # Будет вычислено при необходимости
+                "range_right": None,
+                "auto_sensor": sensor_names[0],
+                "auto_range_left": None,
+                "auto_range_right": None,
+                "manual_sensor": False,
+                "manual_range": False,
+                "magnet_x": None,
+            }
