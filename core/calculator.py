@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 from .interpolator import Interpolator
+from .magnet_locator import MagnetLocator
 from models.analyzers import SignalAnalyzer
 
 
