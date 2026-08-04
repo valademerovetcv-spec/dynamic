@@ -1669,7 +1669,8 @@ class DinamikaApp:
                 result = do_calculate()
                 self.root.after(0, lambda: on_complete(result))
             except Exception as e:
-                self.root.after(0, lambda: on_error(e))
+                error_msg = str(e)
+                self.root.after(0, lambda msg=error_msg: on_error(msg))
         
         thread = threading.Thread(target=task_wrapper, daemon=True)
         thread.start()
