@@ -1579,17 +1579,30 @@ class DinamikaApp:
 
     def _analyze_deformations(self):
         """Анализ послойных деформаций с использованием данных перемещения от времени."""
+        # Показываем пользователю, что анализ начался
+        self.status_var.set("Выполнение анализа деформаций...")
+        self.deform_status_label.configure(text="Анализ...")
+        self.root.update_idletasks()  # Обновляем UI перед началом расчёта
+        
         # Проверяем наличие данных: используем result_channels_raw или result_channels
         has_data = False
         if hasattr(self.loader, 'result_channels_raw') and self.loader.result_channels_raw:
             has_data = True
+            print(f"[DEBUG] Используем result_channels_raw: {list(self.loader.result_channels_raw.keys())}")
         elif self.loader.result_channels:
             has_data = True
+            print(f"[DEBUG] Используем result_channels: {list(self.loader.result_channels.keys())}")
             
         if not has_data or self.loader.dynamics_time is None:
             messagebox.showinfo("Информация", 
                 "Сначала загрузите данные динамики и тарировки,\n"
-                "затем выполните расчёт для получения данных перемещения.")
+                "затем выполните расчёт для получения данных перемещения.\n\n"
+                f"Текущее состояние:\n"
+                f"- dynamics_time: {'есть' if self.loader.dynamics_time is not None else 'нет'}\n"
+                f"- result_channels_raw: {'есть' if hasattr(self.loader, 'result_channels_raw') and self.loader.result_channels_raw else 'нет'}\n"
+                f"- result_channels: {'есть' if self.loader.result_channels else 'нет'}")
+            self.status_var.set("Анализ не выполнен: нет данных")
+            self.deform_status_label.configure(text="Нет данных для анализа")
             return
         
         try:
@@ -1619,19 +1632,26 @@ class DinamikaApp:
         data = np.column_stack(data_list)
         
         # Создание анализатора
+        print(f"[DEBUG] Создание DeformationAnalyzer: time_ms len={len(time_ms)}, data shape={data.shape}, layers={layer_names}")
         self.deformation_analyzer = DeformationAnalyzer(time_ms, data, layer_names)
         
         # Поиск участков деформаций
+        print(f"[DEBUG] Поиск участков с порогом σ={threshold_sigma}")
         zones = self.deformation_analyzer.find_zones(threshold_sigma=threshold_sigma)
         self._deformation_zones = zones
+        print(f"[DEBUG] Найдено участков: {len(zones) if zones else 0}")
         
         if not zones:
             self.deform_status_label.configure(text="Участки деформаций не найдены")
-            messagebox.showinfo("Результат", "Участки деформаций не найдены.\n"
-                               "Попробуйте уменьшить порог σ.")
+            messagebox.showinfo("Результат", 
+                               f"Участки деформаций не найдены.\n"
+                               f"Данные: время={len(time_ms)} точек, слои={len(layer_names)}\n"
+                               f"Попробуйте уменьшить порог σ (текущий: {threshold_sigma}).")
+            self.status_var.set("Анализ завершён: участки не найдены")
             return
         
         # Создание вкладок для каждого участка
+        print(f"[DEBUG] Построение вкладок для {len(zones)} участков")
         self._build_deformation_tabs(speed_kmh)
         
         self.deform_status_label.configure(
@@ -1656,22 +1676,36 @@ class DinamikaApp:
             return
         
         # Создаем вкладки для каждого участка
+        print(f"[DEBUG] Создание {len(self._deformation_zones)} вкладок")
         for i, zone_idx in enumerate(range(len(self._deformation_zones))):
             frame = ttk.Frame(self.deformation_notebook)
             tab_name = f"Участок {i + 1}"
             self.deformation_notebook.add(frame, text=f"  {tab_name}  ")
             
             # Вычисляем результаты для участка
-            result = self.deformation_analyzer.zone_result(zone_idx, speed_kmh)
-            self._deformation_tabs[tab_name] = (zone_idx, result, frame)
-            
-            # Добавляем информацию об участке
-            self._populate_deformation_tab(frame, result, zone_idx, speed_kmh)
+            try:
+                result = self.deformation_analyzer.zone_result(zone_idx, speed_kmh)
+                print(f"[DEBUG] Участок {i+1}: result keys={list(result.keys())}")
+                self._deformation_tabs[tab_name] = (zone_idx, result, frame)
+                
+                # Добавляем информацию об участке
+                self._populate_deformation_tab(frame, result, zone_idx, speed_kmh)
+            except Exception as e:
+                print(f"[ERROR] Ошибка при построении вкладки {tab_name}: {e}")
+                import traceback
+                traceback.print_exc()
+                lbl = ttk.Label(frame, text=f"Ошибка построения графика:\n{e}",
+                               foreground="red")
+                lbl.pack(expand=True)
+                self._deformation_tabs[tab_name] = (zone_idx, None, frame)
         
         # Выбираем первую вкладку
         if self._deformation_zones:
-            first_result = self.deformation_analyzer.zone_result(0, speed_kmh)
-            self._current_deformation_zone = 0
+            try:
+                first_result = self.deformation_analyzer.zone_result(0, speed_kmh)
+                self._current_deformation_zone = 0
+            except Exception as e:
+                print(f"[ERROR] Ошибка при получении первого результата: {e}")
 
     def _populate_deformation_tab(self, frame, result, zone_idx, speed_kmh):
         """Заполнение вкладки данными об участке."""
