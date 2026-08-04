@@ -26,8 +26,12 @@ class DataLoaderWithCalc(DataLoader):
     def calculate_all_channels(self, selected_calib=None):
         return self._calculator.calculate_all_channels(selected_calib)
     
-    def calculate_per_layer(self):
-        return self._calculator.calculate_per_layer()
+    def calculate_per_layer(self, progress_callback=None):
+        return self._calculator.calculate_per_layer(progress_callback)
+    
+    def calculate_per_layer_with_progress(self, progress_callback=None):
+        """Алиас для обратной совместимости."""
+        return self._calculator.calculate_per_layer(progress_callback)
     
     def calculate_per_layer_magnet(self):
         return self._calculator.calculate_per_layer_magnet()

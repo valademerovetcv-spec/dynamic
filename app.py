@@ -135,15 +135,16 @@ class DinamikaApp:
         toast.overrideredirect(True)
         toast.attributes('-topmost', True)
         
-        # Стили toast
-        toast_bg = "#1a1a2e"
-        toast_fg = "#ffffff"
-        accent = "#2563eb"
+        # Стили toast - улучшенный дизайн
+        toast_bg = "#1e293b"  # Более мягкий тёмный фон
+        toast_fg = "#f8fafc"  # Светлый текст
+        accent = "#3b82f6"    # Яркий акцент
+        border_color = "#334155"  # Цвет границы
         
         # Размеры
-        width = 320
-        height = 80
-        padding = 10
+        width = 350
+        height = 90
+        padding = 12
         
         # Позиция (правый нижний угол с отступом)
         screen_width = self.root.winfo_screenwidth()
@@ -158,26 +159,40 @@ class DinamikaApp:
         toast.geometry(f"{width}x{height}+{x}+{y}")
         toast.configure(bg=toast_bg)
         
+        # Добавляем цветную полосу слева
+        accent_strip = tk.Frame(toast, bg=accent, width=4, height=height)
+        accent_strip.place(x=0, y=0, relheight=1.0)
+        
         # Контейнер
         container = ttk.Frame(toast, style="TFrame")
-        container.pack(fill=tk.BOTH, expand=True, padx=padding, pady=padding)
+        container.pack(fill=tk.BOTH, expand=True, padx=padding+4, pady=padding)
         
-        # Заголовок
-        title_label = ttk.Label(container, text=title, font=("Segoe UI", 9, "bold"), 
+        # Заголовок с иконкой
+        title_frame = tk.Frame(container, bg=toast_bg)
+        title_frame.pack(anchor=tk.W, fill=tk.X)
+        
+        # Иконка статуса
+        icon_label = tk.Label(title_frame, text="●", font=("Segoe UI", 10), 
+                              bg=toast_bg, fg=accent)
+        icon_label.pack(side=tk.LEFT, padx=(0, 6))
+        
+        title_label = tk.Label(title_frame, text=title, font=("Segoe UI", 9, "bold"), 
                                 background=toast_bg, foreground=accent)
-        title_label.pack(anchor=tk.W)
+        title_label.pack(side=tk.LEFT, anchor=tk.W)
         
         # Сообщение
-        msg_label = ttk.Label(container, text=message, font=("Segoe UI", 8),
-                              background=toast_bg, foreground=toast_fg, wraplength=width - 40)
-        msg_label.pack(anchor=tk.W, pady=(2, 4))
+        msg_label = tk.Label(container, text=message, font=("Segoe UI", 8),
+                              background=toast_bg, foreground=toast_fg, wraplength=width - 60)
+        msg_label.pack(anchor=tk.W, pady=(4, 6))
         
-        # Progressbar
+        # Progressbar с улучшенным стилем
         if progress >= 0:
             progress_var = tk.IntVar(value=int(progress))
             progress_bar = ttk.Progressbar(container, variable=progress_var, 
-                                           maximum=100, mode='determinate', length=width - 40)
+                                           maximum=100, mode='determinate', length=width - 60)
             progress_bar.pack(fill=tk.X)
+            # Настраиваем стиль progressbar
+            progress_bar.configure(style="Accent.Horizontal.TProgressbar")
         else:
             progress_var = None
             progress_bar = None
@@ -222,8 +237,8 @@ class DinamikaApp:
         """Пересчитывает позиции всех toast-уведомлений."""
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
-        width = 320
-        height = 80
+        width = 350
+        height = 90
         base_y = screen_height - height - 20
         
         for i, toast_data in enumerate(self._toasts):
