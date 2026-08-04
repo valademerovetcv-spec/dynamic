@@ -354,42 +354,43 @@ class DinamikaApp:
         self.result_toolbar = NavigationToolbar2Tk(self.result_canvas, tb_frame)
         self.result_toolbar.update()
 
-        # === Peak values panel ===
-        peak_frame = ttk.LabelFrame(bot_paned, text=" Пиковые значения ")
-        bot_paned.add(peak_frame, weight=2)
-
+        # === Peak values panel (скрыто по умолчанию) ===
+        # Закомментировано для скрытия панели "Пиковые значения"
+        # peak_frame = ttk.LabelFrame(bot_paned, text=" Пиковые значения ")
+        # bot_paned.add(peak_frame, weight=2)
+        
         # Создаем фрейм для кнопок и табов диапазонов
-        peak_top_frame = ttk.Frame(peak_frame)
-        peak_top_frame.pack(side=tk.TOP, fill=tk.X, padx=4, pady=(4, 0))
-
+        # peak_top_frame = ttk.Frame(peak_frame)
+        # peak_top_frame.pack(side=tk.TOP, fill=tk.X, padx=4, pady=(4, 0))
+        
         # Фрейм для кнопок (теперь только сброс)
-        peak_btn_frame = ttk.Frame(peak_top_frame)
-        peak_btn_frame.pack(side=tk.LEFT, fill=tk.X)
-
-        self.peak_reset_btn = ttk.Button(peak_btn_frame, text="Сбросить диапазон",
-                                           style="ToolbarCsv.TButton",
-                                           command=self._reset_peak_selection)
-        self.peak_reset_btn.pack(side=tk.LEFT, padx=2)
-
-        self.peak_info_label = ttk.Label(peak_btn_frame, text="", style="Info.TLabel")
-        self.peak_info_label.pack(side=tk.LEFT, padx=8)
-
+        # peak_btn_frame = ttk.Frame(peak_top_frame)
+        # peak_btn_frame.pack(side=tk.LEFT, fill=tk.X)
+        
+        # self.peak_reset_btn = ttk.Button(peak_btn_frame, text="Сбросить диапазон",
+        #                                    style="ToolbarCsv.TButton",
+        #                                    command=self._reset_peak_selection)
+        # self.peak_reset_btn.pack(side=tk.LEFT, padx=2)
+        
+        # self.peak_info_label = ttk.Label(peak_btn_frame, text="", style="Info.TLabel")
+        # self.peak_info_label.pack(side=tk.LEFT, padx=8)
+        
         # Notebook для вкладок диапазонов
-        self.peak_range_notebook = ttk.Notebook(peak_top_frame)
-        self.peak_range_notebook.pack(side=tk.RIGHT, fill=tk.X, expand=True)
-        self._peak_range_tabs = {}
-
-        self.peak_fig = Figure(figsize=(5, 4), dpi=100)
-        self.peak_ax = self.peak_fig.add_subplot(111)
-        self.peak_canvas = FigureCanvasTkAgg(self.peak_fig, master=peak_frame)
-        self.peak_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-
-        self._peak_selection_active = False
-        self._peak_selection_start = None
-        self._peak_selection_rect = None
-        self._peak_press_id = None
-        self._peak_release_id = None
-        self._auto_peak_ranges = []  # Список автоматически определенных диапазонов
+        # self.peak_range_notebook = ttk.Notebook(peak_top_frame)
+        # self.peak_range_notebook.pack(side=tk.RIGHT, fill=tk.X, expand=True)
+        # self._peak_range_tabs = {}
+        
+        # self.peak_fig = Figure(figsize=(5, 4), dpi=100)
+        # self.peak_ax = self.peak_fig.add_subplot(111)
+        # self.peak_canvas = FigureCanvasTkAgg(self.peak_fig, master=peak_frame)
+        # self.peak_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        
+        # self._peak_selection_active = False
+        # self._peak_selection_start = None
+        # self._peak_selection_rect = None
+        # self._peak_press_id = None
+        # self._peak_release_id = None
+        # self._auto_peak_ranges = []  # Список автоматически определенных диапазонов
 
     def _build_temp_tab(self, parent):
         self._temp_file_path = None
@@ -1698,11 +1699,11 @@ class DinamikaApp:
         x = result['x']
         defs = result['defs']
         
-        # Построение графиков для каждого слоя
+        # Построение графиков для каждого слоя (переворачиваем знак для правильной ориентации)
         for i in range(self.deformation_analyzer.n_layers):
             layer_name = self.deformation_analyzer.layer_names[i]
             color = CHANNEL_COLORS[i % len(CHANNEL_COLORS)]
-            ax.plot(x, defs[:, i], linewidth=1.5, color=color, label=layer_name)
+            ax.plot(x, -defs[:, i], linewidth=1.5, color=color, label=layer_name)
         
         ax.set_xlabel("Путь, м")
         ax.set_ylabel("Деформация, мм")
