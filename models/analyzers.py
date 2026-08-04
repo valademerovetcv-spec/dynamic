@@ -35,17 +35,22 @@ class SignalAnalyzer:
 
         best_mean = None
         best_len = 0
+        
+        # Оптимизация: используем векторизованные операции там, где возможно
         step = 1 if n <= 4000 else max(1, n // 4000)
 
         for start in range(0, n - min_len + 1, step):
             end = start + min_len
             seg = arr[start:end]
             seg_mean = float(np.mean(seg))
-            if np.std(seg) > max_std or seg_mean > lower_ceiling:
+            seg_std = float(np.std(seg))
+            if seg_std > max_std or seg_mean > lower_ceiling:
                 continue
             while end < n:
                 seg = arr[start:end + 1]
-                if np.std(seg) > max_std or float(np.mean(seg)) > lower_ceiling:
+                seg_std = float(np.std(seg))
+                seg_mean = float(np.mean(seg))
+                if seg_std > max_std or seg_mean > lower_ceiling:
                     break
                 end += 1
             length = end - start

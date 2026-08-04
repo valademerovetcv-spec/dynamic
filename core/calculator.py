@@ -30,9 +30,14 @@ class Calculator:
     def _find_rising_range(self, disp, tug):
         """Восходящий участок тарировки: от минимума до пика."""
         disp = np.asarray(disp, dtype=float)
-        if len(disp) == 0:
+        tug = np.asarray(tug, dtype=float)
+        if len(disp) == 0 or len(tug) == 0:
             return 0.0, 0.0
-        min_idx, peak_idx = self._find_rising_indices(tug)
+        # Векторизованный поиск индексов
+        peak_idx = int(np.argmax(tug))
+        if peak_idx == 0:
+            return 0.0, 0.0
+        min_idx = int(np.argmin(tug[:peak_idx]))
         left = float(disp[min_idx])
         right = float(disp[peak_idx])
         if left > right:
@@ -43,11 +48,16 @@ class Calculator:
         """Пересечение восходящих диапазонов всех датчиков."""
         if not ranges:
             return 0.0, 0.0
-        left = max(r[0] for r in ranges)
-        right = min(r[1] for r in ranges)
+        # Векторизованное вычисление через numpy
+        ranges_arr = np.array(ranges)
+        left = float(np.max(ranges_arr[:, 0]))
+        right = float(np.min(ranges_arr[:, 1]))
         if left < right:
             return left, right
-        return min(ranges, key=lambda r: r[1] - r[0])
+        # Если нет перекрытия, выбираем самый узкий диапазон
+        spreads = ranges_arr[:, 1] - ranges_arr[:, 0]
+        best_idx = int(np.argmin(spreads))
+        return float(ranges_arr[best_idx, 0]), float(ranges_arr[best_idx, 1])
 
     def _common_rising_bounds(self, disp, tug_series):
         """Общее окно индексов восходящей ветки для нескольких датчиков."""
@@ -439,29 +449,34 @@ class Calculator:
             for s_name, tug_vals in zip(tug_names, tug_list):
                 x_points = []
                 for level in levels:
-                    for i in range(len(tug_vals) - 1):
-                        if (tug_vals[i] - level) * (tug_vals[i + 1] - level) < 0:
-                            x0, x1 = disp[i], disp[i + 1]
-                            y0, y1 = tug_vals[i], tug_vals[i + 1]
-                            if y1 != y0:
-                                t = (level - y0) / (y1 - y0)
-                                x_cross = x0 + t * (x1 - x0)
-                                if overlap_left <= x_cross <= overlap_right:
-                                    x_points.append(float(x_cross))
+                    # Векторизованный поиск пересечений
+                    diff = tug_vals - level
+                    sign_changes = np.where(diff[:-1] * diff[1:] < 0)[0]
+                    
+                    for i in sign_changes:
+                        x0, x1 = disp[i], disp[i + 1]
+                        y0, y1 = tug_vals[i], tug_vals[i + 1]
+                        if y1 != y0:
+                            t = (level - y0) / (y1 - y0)
+                            x_cross = x0 + t * (x1 - x0)
+                            if overlap_left <= x_cross <= overlap_right:
+                                x_points.append(float(x_cross))
 
                 x_points = sorted(set(x_points))
 
                 if len(x_points) >= 3:
+                    # Оптимизированный поиск лучшей группы через sliding window
+                    x_arr = np.array(x_points)
                     best_spread = float('inf')
                     best_group = []
-                    for i in range(len(x_points) - 2):
-                        for j in range(i + 1, len(x_points) - 1):
-                            for k in range(j + 1, len(x_points)):
-                                group = [x_points[i], x_points[j], x_points[k]]
-                                spread = max(group) - min(group)
-                                if spread < best_spread:
-                                    best_spread = spread
-                                    best_group = group
+                    
+                    # Используем скользящее окно размером 3
+                    for i in range(len(x_arr) - 2):
+                        group = x_arr[i:i+3]
+                        spread = group[-1] - group[0]
+                        if spread < best_spread:
+                            best_spread = spread
+                            best_group = group.tolist()
 
                     sensor_data[s_name] = {
                         'x_points': x_points,
