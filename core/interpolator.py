@@ -44,7 +44,7 @@ class Interpolator:
     @staticmethod
     def calc_single_channel(tugriki_vals, calib_tugriki, calib_disp):
         """
-        Расчёт перемещения для одного канала.
+        Расчёт перемещения для одного канала с использованием векторизованной интерполяции.
         
         Args:
             tugriki_vals: массив значений динамики
@@ -54,10 +54,45 @@ class Interpolator:
         Returns:
             np.array: массив рассчитанных перемещений
         """
-        result = np.empty(len(tugriki_vals))
-        for i, t in enumerate(tugriki_vals):
-            d = Interpolator.interp_linear(t, calib_tugriki, calib_disp)
-            result[i] = d if d is not None else 0.0
+        tugriki_vals = np.asarray(tugriki_vals, dtype=float)
+        calib_tugriki = np.asarray(calib_tugriki, dtype=float)
+        calib_disp = np.asarray(calib_disp, dtype=float)
+        
+        n_calib = len(calib_tugriki)
+        if n_calib < 2:
+            return np.zeros_like(tugriki_vals)
+        
+        # Векторизованная интерполяция через searchsorted
+        # Сортируем калибровочные данные по tugriki (если ещё не отсортированы)
+        sort_idx = np.argsort(calib_tugriki)
+        calib_tug_sorted = calib_tugriki[sort_idx]
+        calib_disp_sorted = calib_disp[sort_idx]
+        
+        # Находим индексы интерполяции для всех значений одновременно
+        indices = np.searchsorted(calib_tug_sorted, tugriki_vals, side='right')
+        
+        # Ограничиваем индексы допустимым диапазоном
+        indices = np.clip(indices, 1, n_calib - 1)
+        
+        # Получаем соседние точки для интерполяции
+        t0 = calib_tug_sorted[indices - 1]
+        t1 = calib_tug_sorted[indices]
+        d0 = calib_disp_sorted[indices - 1]
+        d1 = calib_disp_sorted[indices]
+        
+        # Вычисляем интерполяцию
+        denom = t1 - t0
+        # Избегаем деления на ноль
+        mask = denom != 0
+        result = np.where(mask, d0 + (tugriki_vals - t0) * (d1 - d0) / denom, d0)
+        
+        # Обработка граничных случаев (за пределами калибровки)
+        below_mask = tugriki_vals <= calib_tug_sorted[0]
+        above_mask = tugriki_vals >= calib_tug_sorted[-1]
+        
+        result = np.where(below_mask, calib_disp_sorted[0], result)
+        result = np.where(above_mask, calib_disp_sorted[-1], result)
+        
         return np.round(result, 3)
 
     @staticmethod
