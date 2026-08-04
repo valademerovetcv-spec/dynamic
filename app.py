@@ -187,6 +187,9 @@ class DinamikaApp:
 
         self._build_deform_tab(self.tab_deform)
         self._build_temp_tab(self.tab_temp)
+        
+        # Добавляем панель анализа деформаций после основных вкладок
+        self._build_deformation_panel(self.tab_deform)
 
     def _build_deform_tab(self, parent):
         main_paned = ttk.PanedWindow(parent, orient=tk.VERTICAL)
@@ -306,8 +309,53 @@ class DinamikaApp:
         chart = ttk.LabelFrame(bot_paned, text=" График: Перемещение от времени ")
         bot_paned.add(chart, weight=3)
 
+        self.result_fig = Figure(figsize=(7, 4), dpi=100)
+        self.result_ax = self.result_fig.add_subplot(111)
+
+        # Pack toggle frame and toolbar first (at bottom)
+        self.result_toggle_frame = ttk.Frame(chart)
+        self.result_toggle_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=(0, 2))
+
+        tb_frame = ttk.Frame(chart)
+        tb_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=(0, 4))
+
+        # Create and pack canvas last (fills remaining space)
+        self.result_canvas = FigureCanvasTkAgg(self.result_fig, master=chart)
+        self.result_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+        self.result_canvas.mpl_connect('motion_notify_event', self._on_result_motion)
+        self.result_canvas.mpl_connect('axes_leave_event', self._on_result_leave)
+
+        self.result_toolbar = NavigationToolbar2Tk(self.result_canvas, tb_frame)
+        self.result_toolbar.update()
+
+    def _build_deformation_panel(self, parent):
+        """Создание панели анализа деформаций в отдельном окне."""
+        # Основной фрейм с прокруткой
+        self.deform_main_frame = ttk.LabelFrame(parent, text=" Анализ деформаций ")
+        self.deform_main_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 0))
+        
+        # Контейнер для скролла
+        deform_container = ttk.Frame(self.deform_main_frame)
+        deform_container.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        
+        self.deform_canvas = tk.Canvas(deform_container, bg=PANEL_BG, highlightthickness=0)
+        deform_vsb = ttk.Scrollbar(deform_container, orient=tk.VERTICAL, command=self.deform_canvas.yview)
+        self.deform_inner = ttk.Frame(self.deform_canvas)
+        
+        self.deform_inner.bind(
+            "<Configure>",
+            lambda e: self.deform_canvas.configure(scrollregion=self.deform_canvas.bbox("all"))
+        )
+        
+        self.deform_canvas.create_window((0, 0), window=self.deform_inner, anchor="nw")
+        self.deform_canvas.configure(yscrollcommand=deform_vsb.set)
+        
+        self.deform_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        deform_vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        
         # Панель управления анализом деформаций
-        deform_ctrl_frame = ttk.Frame(chart)
+        deform_ctrl_frame = ttk.Frame(self.deform_inner)
         deform_ctrl_frame.pack(side=tk.TOP, fill=tk.X, padx=4, pady=(4, 0))
         
         self.analyze_deform_btn = ttk.Button(deform_ctrl_frame, text="🔍 Анализировать деформации",
@@ -329,68 +377,19 @@ class DinamikaApp:
         self.deform_status_label.pack(side=tk.LEFT, padx=15)
         
         # Notebook для вкладок участков деформаций
-        self.deformation_notebook = ttk.Notebook(chart)
+        self.deformation_notebook = ttk.Notebook(self.deform_inner)
         self.deformation_notebook.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
         self._deformation_tabs = {}
         self.deformation_notebook.bind("<<NotebookTabChanged>>", self._on_deformation_tab_changed)
-
-        self.result_fig = Figure(figsize=(7, 4), dpi=100)
-        self.result_ax = self.result_fig.add_subplot(111)
-
-        # Pack toggle frame and toolbar first (at bottom)
-        self.result_toggle_frame = ttk.Frame(chart)
-        self.result_toggle_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=(0, 2))
-
-        tb_frame = ttk.Frame(chart)
-        tb_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=(0, 4))
-
-        # Create and pack canvas last (fills remaining space)
-        self.result_canvas = FigureCanvasTkAgg(self.result_fig, master=chart)
-        self.result_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-
-        self.result_canvas.mpl_connect('motion_notify_event', self._on_result_motion)
-        self.result_canvas.mpl_connect('axes_leave_event', self._on_result_leave)
-
-        self.result_toolbar = NavigationToolbar2Tk(self.result_canvas, tb_frame)
-        self.result_toolbar.update()
-
-        # === Peak values panel (скрыто по умолчанию) ===
-        # Закомментировано для скрытия панели "Пиковые значения"
-        # peak_frame = ttk.LabelFrame(bot_paned, text=" Пиковые значения ")
-        # bot_paned.add(peak_frame, weight=2)
         
-        # Создаем фрейм для кнопок и табов диапазонов
-        # peak_top_frame = ttk.Frame(peak_frame)
-        # peak_top_frame.pack(side=tk.TOP, fill=tk.X, padx=4, pady=(4, 0))
-        
-        # Фрейм для кнопок (теперь только сброс)
-        # peak_btn_frame = ttk.Frame(peak_top_frame)
-        # peak_btn_frame.pack(side=tk.LEFT, fill=tk.X)
-        
-        # self.peak_reset_btn = ttk.Button(peak_btn_frame, text="Сбросить диапазон",
-        #                                    style="ToolbarCsv.TButton",
-        #                                    command=self._reset_peak_selection)
-        # self.peak_reset_btn.pack(side=tk.LEFT, padx=2)
-        
-        # self.peak_info_label = ttk.Label(peak_btn_frame, text="", style="Info.TLabel")
-        # self.peak_info_label.pack(side=tk.LEFT, padx=8)
-        
-        # Notebook для вкладок диапазонов
-        # self.peak_range_notebook = ttk.Notebook(peak_top_frame)
-        # self.peak_range_notebook.pack(side=tk.RIGHT, fill=tk.X, expand=True)
-        # self._peak_range_tabs = {}
-        
-        # self.peak_fig = Figure(figsize=(5, 4), dpi=100)
-        # self.peak_ax = self.peak_fig.add_subplot(111)
-        # self.peak_canvas = FigureCanvasTkAgg(self.peak_fig, master=peak_frame)
-        # self.peak_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-        
-        # self._peak_selection_active = False
-        # self._peak_selection_start = None
-        # self._peak_selection_rect = None
-        # self._peak_press_id = None
-        # self._peak_release_id = None
-        # self._auto_peak_ranges = []  # Список автоматически определенных диапазонов
+        # Инициализация пустой вкладки
+        default_frame = ttk.Frame(self.deformation_notebook)
+        self.deformation_notebook.add(default_frame, text="  Нет данных  ")
+        lbl = ttk.Label(default_frame, text="Нажмите кнопку 'Анализировать деформации' для начала анализа",
+                       background=PANEL_BG, foreground="#94a3b8",
+                       font=("Segoe UI", 10, "italic"))
+        lbl.pack(expand=True, pady=20)
+        self._deformation_tabs["Нет данных"] = default_frame
 
     def _build_temp_tab(self, parent):
         self._temp_file_path = None
