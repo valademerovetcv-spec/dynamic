@@ -1348,10 +1348,10 @@ class DinamikaApp:
         auto_left = info.get("auto_range_left", r_left)
         auto_right = info.get("auto_range_right", r_right)
         magnet_x = info.get("magnet_x")
-        mag_hint = f"  X={magnet_x:.1f}" if magnet_x is not None else ""
+        mag_hint = f"  X={magnet_x:.1f}" if magnet_x is not None and not (isinstance(magnet_x, float) and magnet_x != magnet_x) else ""
         auto_label = ttk.Label(
             row,
-            text=f"{mode_text}\n↑ {auto_left:.1f}—{auto_right:.1f} мм{mag_hint}",
+            text=f"{mode_text}\n\u2191 {auto_left:.1f}\u2014{auto_right:.1f} \u043c\u043c{mag_hint}",
             background=PANEL_BG, foreground="#64748b", font=("Segoe UI", 8), width=12)
         auto_label.grid(row=0, column=4, padx=2, sticky="w")
 
@@ -1407,10 +1407,10 @@ class DinamikaApp:
         magnet_x = None
         if layer_name in self.loader._per_layer_magnet_x:
             magnet_x = self.loader._per_layer_magnet_x.get(layer_name)
-        mag_hint = f"  X={magnet_x:.1f}" if magnet_x is not None else ""
+        mag_hint = f"  X={magnet_x:.1f}" if magnet_x is not None and not (isinstance(magnet_x, float) and magnet_x != magnet_x) else ""
         
         widgets["auto_label"].configure(
-            text=f"{mode_text}\n↑ {auto_left:.1f}—{auto_right:.1f} мм{mag_hint}"
+            text=f"{mode_text}\n\u2191 {auto_left:.1f}\u2014{auto_right:.1f} \u043c\u043c{mag_hint}"
         )
 
     def _apply_calib_selection(self):
