@@ -522,6 +522,14 @@ class DinamikaApp:
 
         self.stats_var = tk.StringVar(value="")
         ttk.Label(sb, textvariable=self.stats_var, style="Status.TLabel").pack(side=tk.RIGHT)
+        
+        # Progressbar для отображения прогресса расчёта по слоям
+        self.calc_progress_var = tk.IntVar(value=0)
+        self.calc_progress_bar = ttk.Progressbar(sb, variable=self.calc_progress_var, 
+                                                  maximum=100, mode='determinate', length=200)
+        self.calc_progress_bar.pack(side=tk.RIGHT, padx=10)
+        self.calc_progress_label = ttk.Label(sb, text="", style="Info.TLabel", width=25)
+        self.calc_progress_label.pack(side=tk.RIGHT, padx=5)
 
     def _make_tree(self, parent):
         container = ttk.Frame(parent)
@@ -1456,6 +1464,10 @@ class DinamikaApp:
         
         num_layers = len(self.loader.per_layer_calib) if hasattr(self.loader, 'per_layer_calib') and self.loader.per_layer_calib else 0
         
+        # Сбрасываем прогрессбар перед началом расчёта
+        self.calc_progress_var.set(0)
+        self.calc_progress_label.configure(text="")
+        
         def do_calculate():
             try:
                 if has_per_layer:
@@ -1470,6 +1482,10 @@ class DinamikaApp:
         
         def on_complete(result):
             try:
+                # Скрываем прогрессбар после завершения
+                self.calc_progress_var.set(100)
+                self.calc_progress_label.configure(text="")
+                
                 self._populate_tree(self.tree_result, self.loader.result_df)
                 self._update_channel_toggles()
                 self._draw_result_chart()
@@ -1500,6 +1516,8 @@ class DinamikaApp:
             except Exception as e:
                 messagebox.showerror("Ошибка расчёта", str(e))
                 self.status_var.set("Ошибка расчёта")
+                self.calc_progress_var.set(0)
+                self.calc_progress_label.configure(text="")
             finally:
                 self._calculating = False
         
@@ -1507,6 +1525,8 @@ class DinamikaApp:
             messagebox.showerror("Ошибка расчёта", str(error))
             self.status_var.set("Ошибка расчёта")
             self._calculating = False
+            self.calc_progress_var.set(0)
+            self.calc_progress_label.configure(text="")
         
         def task_wrapper():
             try:
@@ -2308,10 +2328,10 @@ class DinamikaApp:
                     if info:
                         r_left = info.get("range_left")
                         r_right = info.get("range_right")
-                        if r_left is not None:
+                        if r_left is not None and isinstance(r_left, (int, float)):
                             self.disp_ax.axvline(r_left, color="#ef4444",
                                                  linewidth=1.0, linestyle="--", alpha=0.6)
-                        if r_right is not None:
+                        if r_right is not None and isinstance(r_right, (int, float)):
                             self.disp_ax.axvline(r_right, color="#ef4444",
                                                  linewidth=1.0, linestyle="--", alpha=0.6)
                         visible_any = True
@@ -2334,10 +2354,10 @@ class DinamikaApp:
             if info:
                 r_left = info.get("range_left")
                 r_right = info.get("range_right")
-                if r_left is not None:
+                if r_left is not None and isinstance(r_left, (int, float)):
                     self.disp_ax.axvline(r_left, color="#ef4444",
                                          linewidth=1.0, linestyle="--", alpha=0.6)
-                if r_right is not None:
+                if r_right is not None and isinstance(r_right, (int, float)):
                     self.disp_ax.axvline(r_right, color="#ef4444",
                                          linewidth=1.0, linestyle="--", alpha=0.6)
             elif self.loader._overlap_range:
