@@ -3,7 +3,7 @@
 """
 import numpy as np
 import pandas as pd
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .interpolator import Interpolator
 from .magnet_locator import MagnetLocator
@@ -586,7 +586,7 @@ class Calculator:
         
         return dn, np.round(result_disp, 3), calib_info
 
-    def calculate_per_layer(self):
+    def calculate_per_layer(self, progress_callback=None):
         """Расчёт перемещений для каждого слоя с использованием многопоточности."""
         if not self.loader.per_layer_calib or not self.loader.dynamics_channels:
             return self.loader.result_df
@@ -612,12 +612,23 @@ class Calculator:
         
         # Запускаем расчёт в нескольких потоках (по одному на слой)
         num_workers = min(len(layer_args), 6)  # Ограничиваем количество потоков
+        completed = 0
+        total = len(layer_args)
+        
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            results = executor.map(self._calc_layer_worker, layer_args)
+            # Используем submit для возможности отслеживания прогресса
+            futures = {executor.submit(self._calc_layer_worker, args): args[0] for args in layer_args}
             
-            for dn, result_disp, calib_info in results:
+            for future in as_completed(futures):
+                dn = futures[future]
+                result_disp, calib_info = future.result()[1], future.result()[2]
                 raw_results[dn] = result_disp
                 calib_infos[dn] = calib_info
+                completed += 1
+                
+                # Вызываем callback для обновления прогресса
+                if progress_callback:
+                    progress_callback(completed, total)
         
         # Сохраняем информацию о калибровке
         self.loader._per_layer_calib_info = calib_infos
