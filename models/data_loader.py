@@ -23,6 +23,7 @@ class DataLoader(ExcelLoader, CSVLoader, XLSXLoader):
         self.dynamics_time = None
         self.calib_disp = None
         self.result_channels = None
+        self.result_channels_raw = None
         self.magnet_position = None
         self.magnet_info = ""
         self.calib_branches = None
