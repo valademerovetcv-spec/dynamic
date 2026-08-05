@@ -1,12 +1,18 @@
 """
 Модуль для линейной интерполяции и расчёта перемещений.
+Оптимизированная версия с кэшированием и векторизацией.
 """
 import numpy as np
+from functools import lru_cache
 
 
 class Interpolator:
-    """Класс для интерполяции значений перемещения."""
-
+    """Класс для интерполяции значений перемещения с оптимизацией."""
+    
+    # Кэш для отсортированных калибровочных данных
+    _calib_cache = {}
+    _cache_max_size = 128
+    
     @staticmethod
     def interp_linear(target, tug_vals, disp_vals):
         """
@@ -54,24 +60,21 @@ class Interpolator:
         Returns:
             np.array: массив рассчитанных перемещений
         """
-        tugriki_vals = np.asarray(tugriki_vals, dtype=float)
-        calib_tugriki = np.asarray(calib_tugriki, dtype=float)
-        calib_disp = np.asarray(calib_disp, dtype=float)
+        tugriki_vals = np.asarray(tugriki_vals, dtype=np.float64)
+        calib_tugriki = np.asarray(calib_tugriki, dtype=np.float64)
+        calib_disp = np.asarray(calib_disp, dtype=np.float64)
         
         n_calib = len(calib_tugriki)
         if n_calib < 2:
             return np.zeros_like(tugriki_vals)
         
         # Векторизованная интерполяция через searchsorted
-        # Сортируем калибровочные данные по tugriki (если ещё не отсортированы)
         sort_idx = np.argsort(calib_tugriki)
         calib_tug_sorted = calib_tugriki[sort_idx]
         calib_disp_sorted = calib_disp[sort_idx]
         
         # Находим индексы интерполяции для всех значений одновременно
         indices = np.searchsorted(calib_tug_sorted, tugriki_vals, side='right')
-        
-        # Ограничиваем индексы допустимым диапазоном
         indices = np.clip(indices, 1, n_calib - 1)
         
         # Получаем соседние точки для интерполяции
@@ -82,7 +85,6 @@ class Interpolator:
         
         # Вычисляем интерполяцию
         denom = t1 - t0
-        # Избегаем деления на ноль
         mask = denom != 0
         result = np.where(mask, d0 + (tugriki_vals - t0) * (d1 - d0) / denom, d0)
         
@@ -108,7 +110,7 @@ class Interpolator:
         Returns:
             np.array: массив рассчитанных перемещений
         """
-        tugriki_vals = np.asarray(tugriki_vals, dtype=float)
+        tugriki_vals = np.asarray(tugriki_vals, dtype=np.float64)
         n_calib = len(calib_tugriki)
         
         if n_calib < 2:
@@ -137,6 +139,65 @@ class Interpolator:
         result = np.where(above_mask, calib_disp[-1], result)
         
         return np.round(result, 3)
+    
+    @staticmethod
+    def calc_multi_channels_vectorized(tugriki_matrix, calib_tugriki, calib_disp):
+        """
+        Векторизованный расчёт перемещений для нескольких каналов одновременно.
+        
+        Args:
+            tugriki_matrix: 2D массив [n_channels, n_samples] значений динамики
+            calib_tugriki: калибровочные значения датчика (1D массив)
+            calib_disp: калибровочные перемещения (1D массив)
+            
+        Returns:
+            np.array: 2D массив [n_channels, n_samples] рассчитанных перемещений
+        """
+        tugriki_matrix = np.asarray(tugriki_matrix, dtype=np.float64)
+        calib_tugriki = np.asarray(calib_tugriki, dtype=np.float64)
+        calib_disp = np.asarray(calib_disp, dtype=np.float64)
+        
+        if tugriki_matrix.ndim == 1:
+            tugriki_matrix = tugriki_matrix.reshape(1, -1)
+        
+        n_channels, n_samples = tugriki_matrix.shape
+        n_calib = len(calib_tugriki)
+        
+        if n_calib < 2:
+            return np.zeros_like(tugriki_matrix)
+        
+        # Сортируем калибровочные данные один раз
+        sort_idx = np.argsort(calib_tugriki)
+        calib_tug_sorted = calib_tugriki[sort_idx]
+        calib_disp_sorted = calib_disp[sort_idx]
+        
+        # Предварительно выделяем память для результата
+        result = np.empty((n_channels, n_samples), dtype=np.float64)
+        
+        # Векторизованная интерполяция для всех каналов
+        for ch in range(n_channels):
+            tug_ch = tugriki_matrix[ch]
+            indices = np.searchsorted(calib_tug_sorted, tug_ch, side='right')
+            indices = np.clip(indices, 1, n_calib - 1)
+            
+            t0 = calib_tug_sorted[indices - 1]
+            t1 = calib_tug_sorted[indices]
+            d0 = calib_disp_sorted[indices - 1]
+            d1 = calib_disp_sorted[indices]
+            
+            denom = t1 - t0
+            mask = denom != 0
+            ch_result = np.where(mask, d0 + (tug_ch - t0) * (d1 - d0) / denom, d0)
+            
+            # Граничные случаи
+            below_mask = tug_ch <= calib_tug_sorted[0]
+            above_mask = tug_ch >= calib_tug_sorted[-1]
+            ch_result = np.where(below_mask, calib_disp_sorted[0], ch_result)
+            ch_result = np.where(above_mask, calib_disp_sorted[-1], ch_result)
+            
+            result[ch] = np.round(ch_result, 3)
+        
+        return result
 
     @staticmethod
     def extract_rising_branch(disp, tug, range_left=None, range_right=None):
@@ -154,8 +215,8 @@ class Interpolator:
         """
         from .magnet_locator import MagnetLocator
         
-        disp = np.asarray(disp, dtype=float)
-        tug = np.asarray(tug, dtype=float)
+        disp = np.asarray(disp, dtype=np.float64)
+        tug = np.asarray(tug, dtype=np.float64)
         min_idx, peak_idx = MagnetLocator.find_rising_indices(tug)
 
         cal_disp = disp[min_idx:peak_idx + 1].copy()
@@ -194,8 +255,8 @@ class Interpolator:
         """
         from .magnet_locator import MagnetLocator
         
-        disp = np.asarray(disp, dtype=float)
-        tug = np.asarray(tug, dtype=float)
+        disp = np.asarray(disp, dtype=np.float64)
+        tug = np.asarray(tug, dtype=np.float64)
         min_idx, peak_idx = MagnetLocator.find_rising_indices(tug)
 
         # Извлекаем восходящий участок
@@ -226,3 +287,40 @@ class Interpolator:
             'disp_raw': disp_raw,
             'tug_raw': tug_raw,
         }
+    
+    @staticmethod
+    def clear_cache():
+        """Очистка кэша калибровочных данных."""
+        Interpolator._calib_cache.clear()
+    
+    @staticmethod
+    def prepare_calib_cached(sensor_name, disp, tug, range_left=None, range_right=None):
+        """
+        Подготовка калибровочных данных с кэшированием по имени сенсора.
+        
+        Args:
+            sensor_name: уникальное имя сенсора для кэширования
+            disp: массив перемещений
+            tug: массив значений датчика
+            range_left: левая граница диапазона (опционально)
+            range_right: правая граница диапазона (опционально)
+            
+        Returns:
+            dict: подготовленные калибровочные данные
+        """
+        # Создаём ключ кэша
+        cache_key = (sensor_name, range_left, range_right)
+        
+        if cache_key in Interpolator._calib_cache:
+            return Interpolator._calib_cache[cache_key]
+        
+        # Подготавливаем данные
+        result = Interpolator.prepare_calib_branch(disp, tug, range_left, range_right)
+        
+        # Кэшируем результат
+        if len(Interpolator._calib_cache) >= Interpolator._cache_max_size:
+            # Удаляем oldest entry при переполнении
+            Interpolator._calib_cache.pop(next(iter(Interpolator._calib_cache)))
+        
+        Interpolator._calib_cache[cache_key] = result
+        return result

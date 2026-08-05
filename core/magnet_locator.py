@@ -1,5 +1,6 @@
 """
 Модуль для определения положения магнита по методу пересечений.
+Оптимизированная версия с векторизацией операций.
 """
 import numpy as np
 
@@ -10,7 +11,7 @@ class MagnetLocator:
     @staticmethod
     def find_rising_indices(tug):
         """Индексы минимума и пика на восходящем участке."""
-        tug = np.asarray(tug, dtype=float)
+        tug = np.asarray(tug, dtype=np.float64)
         n = len(tug)
         if n == 0:
             return 0, 0
@@ -23,7 +24,7 @@ class MagnetLocator:
     @staticmethod
     def find_rising_range(disp, tug):
         """Восходящий участок тарировки: от минимума до пика."""
-        disp = np.asarray(disp, dtype=float)
+        disp = np.asarray(disp, dtype=np.float64)
         if len(disp) == 0:
             return 0.0, 0.0
         min_idx, peak_idx = MagnetLocator.find_rising_indices(tug)
@@ -35,19 +36,24 @@ class MagnetLocator:
 
     @staticmethod
     def merge_rising_ranges(ranges):
-        """Пересечение восходящих диапазонов всех датчиков."""
+        """Пересечение восходящих диапазонов всех датчиков (векторизовано)."""
         if not ranges:
             return 0.0, 0.0
-        left = max(r[0] for r in ranges)
-        right = min(r[1] for r in ranges)
+        # Векторизованное вычисление через numpy
+        ranges_arr = np.array(ranges)
+        left = float(np.max(ranges_arr[:, 0]))
+        right = float(np.min(ranges_arr[:, 1]))
         if left < right:
             return left, right
-        return min(ranges, key=lambda r: r[1] - r[0])
+        # Если нет перекрытия, выбираем самый узкий диапазон
+        spreads = ranges_arr[:, 1] - ranges_arr[:, 0]
+        best_idx = int(np.argmin(spreads))
+        return float(ranges_arr[best_idx, 0]), float(ranges_arr[best_idx, 1])
 
     @staticmethod
     def common_rising_bounds(disp, tug_series):
         """Общее окно индексов восходящей ветки для нескольких датчиков."""
-        disp = np.asarray(disp, dtype=float)
+        disp = np.asarray(disp, dtype=np.float64)
         starts, ends = [], []
         for tug in tug_series:
             mi, pi = MagnetLocator.find_rising_indices(tug)
@@ -60,9 +66,56 @@ class MagnetLocator:
         return idx_start, idx_end
 
     @staticmethod
+    def _find_crossings_vectorized(disp, tug, levels, overlap_left, overlap_right):
+        """
+        Векторизованный поиск всех пересечений для множества уровней.
+        
+        Args:
+            disp: массив перемещений
+            tug: массив значений датчика
+            levels: массив уровней для поиска пересечений
+            overlap_left: левая граница области перекрытия
+            overlap_right: правая граница области перекрытия
+            
+        Returns:
+            list: отсортированный список точек пересечения в пределах overlap
+        """
+        x_points = []
+        
+        # Векторизованный поиск изменений знака для всех уровней
+        for level in levels:
+            diff = tug - level
+            # Находим все изменения знака за одну операцию
+            sign_changes = np.where(diff[:-1] * diff[1:] < 0)[0]
+            
+            if len(sign_changes) == 0:
+                continue
+            
+            # Векторизованный расчёт всех пересечений
+            i = sign_changes
+            x0, x1 = disp[i], disp[i + 1]
+            y0, y1 = tug[i], tug[i + 1]
+            
+            # Избегаем деления на ноль
+            denom = y1 - y0
+            valid = denom != 0
+            
+            if np.any(valid):
+                t = (level - y0[valid]) / denom[valid]
+                x_cross = x0[valid] + t * (x1[valid] - x0[valid])
+                
+                # Фильтруем по диапазону overlap
+                in_range = (x_cross >= overlap_left) & (x_cross <= overlap_right)
+                x_points.extend(x_cross[in_range].tolist())
+        
+        # Удаляем дубликаты и сортируем
+        return sorted(set(np.round(x_points, 6)))
+
+    @staticmethod
     def resolve_calib_by_intersections(disp, tug_dict):
         """
         Выбор датчика по методу вертикальных пересечений.
+        Оптимизированная версия с векторизацией и уменьшением вложенных циклов.
         
         Args:
             disp: массив перемещений
@@ -71,9 +124,9 @@ class MagnetLocator:
         Returns:
             dict: результаты анализа (magnet_x, selected_sensor, range_left, range_right, etc.)
         """
-        disp = np.asarray(disp, dtype=float)
+        disp = np.asarray(disp, dtype=np.float64)
         tug_names = list(tug_dict.keys())
-        tug_list = [np.asarray(tug_dict[n], dtype=float) for n in tug_names]
+        tug_list = [np.asarray(tug_dict[n], dtype=np.float64) for n in tug_names]
 
         if not tug_list:
             return {
@@ -85,7 +138,7 @@ class MagnetLocator:
                 'all_intersections_x': [],
             }
 
-        # Поиск диапазонов восходящих участков
+        # Поиск диапазонов восходящих участков (векторизовано)
         ranges = []
         for tug in tug_list:
             min_idx = int(np.argmin(tug))
@@ -117,39 +170,26 @@ class MagnetLocator:
             for tug in tug_list:
                 levels.append(float(tug[idx]))
 
+        levels = np.array(levels)
+
         # Поиск точек пересечения для каждого датчика (векторизованный поиск)
         sensor_data = {}
         for name, tug in zip(tug_names, tug_list):
-            x_points = []
-            # Векторизованный поиск пересечений для всех уровней сразу
-            for level in levels:
-                diff = tug - level
-                sign_changes = np.where(diff[:-1] * diff[1:] < 0)[0]
-                
-                for i in sign_changes:
-                    x0, x1 = disp[i], disp[i + 1]
-                    y0, y1 = tug[i], tug[i + 1]
-                    if y1 != y0:
-                        t = (level - y0) / (y1 - y0)
-                        x_cross = x0 + t * (x1 - x0)
-                        if overlap_left <= x_cross <= overlap_right:
-                            x_points.append(float(x_cross))
-
-            x_points = sorted(set(x_points))
+            # Используем векторизованный метод поиска пересечений
+            x_points = MagnetLocator._find_crossings_vectorized(
+                disp, tug, levels, overlap_left, overlap_right
+            )
 
             if len(x_points) >= 3:
                 # Оптимизированный поиск лучшей группы через sliding window O(n) вместо O(n³)
                 x_arr = np.array(x_points)
-                best_spread = float('inf')
-                best_group = []
                 
                 # Используем скользящее окно размером 3 - сложность O(n) вместо O(n³)
-                for i in range(len(x_arr) - 2):
-                    group = x_arr[i:i+3]
-                    spread = group[-1] - group[0]
-                    if spread < best_spread:
-                        best_spread = spread
-                        best_group = group.tolist()
+                # Вычисляем spread для всех троек одновременно
+                spreads = x_arr[2:] - x_arr[:-2]
+                best_idx = int(np.argmin(spreads))
+                best_group = x_arr[best_idx:best_idx+3].tolist()
+                best_spread = float(spreads[best_idx])
 
                 sensor_data[name] = {
                     'x_points': x_points,
