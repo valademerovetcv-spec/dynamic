@@ -296,14 +296,29 @@ class DeformationAnalyzer:
         bottom_layer_idx = self.n_layers - 1
         bottom_layer_def = zone_def[:, bottom_layer_idx]
         
-        # Находим все локальные максимумы на абсолютном значении деформации нижнего слоя
-        abs_bottom = np.abs(bottom_layer_def)
-        candidates = []
-        for i in range(1, len(abs_bottom) - 1):
-            if abs_bottom[i] >= abs_bottom[i - 1] and abs_bottom[i] >= abs_bottom[i + 1]:
-                candidates.append((i, abs_bottom[i]))
+        # Находим точки резкого изменения графика (большая производная)
+        # Вычисляем абсолютную величину первой производной
+        derivative = np.abs(np.diff(bottom_layer_def))
         
-        # Сортируем кандидаты по величине пика (убывание)
+        # Находим все локальные максимумы производной (точки резкого изменения)
+        candidates = []
+        for i in range(1, len(derivative) - 1):
+            if derivative[i] >= derivative[i - 1] and derivative[i] >= derivative[i + 1]:
+                # Сохраняем индекс в исходном массиве (i+1, т.к. производная короче на 1)
+                candidates.append((i + 1, derivative[i]))
+        
+        # Также добавляем локальные максимумы самого сигнала с большой амплитудой
+        abs_bottom = np.abs(bottom_layer_def)
+        threshold = np.mean(abs_bottom) + 2 * np.std(abs_bottom)
+        
+        for i in range(1, len(abs_bottom) - 1):
+            if abs_bottom[i] >= threshold and abs_bottom[i] >= abs_bottom[i - 1] and abs_bottom[i] >= abs_bottom[i + 1]:
+                # Проверяем, нет ли уже такого кандидата
+                already_exists = any(abs(idx - i) < 10 for idx, _ in candidates)
+                if not already_exists:
+                    candidates.append((i, abs_bottom[i]))
+        
+        # Сортируем кандидатов по величине (убывание)
         candidates.sort(key=lambda x: x[1], reverse=True)
         
         # Берём топ пики (сначала самые большие), затем сортируем их по времени
