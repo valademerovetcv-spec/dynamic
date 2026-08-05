@@ -951,7 +951,11 @@ class DinamikaApp:
             n_total = len(self.loader.dynamics_channels)
             self.status_var.set(f"Тарировка загружена для {layer_name} ({n_loaded}/{n_total} слоёв)")
 
-            self.calculate()
+            # Расчёт только для конкретного слоя вместо пересчета всех
+            if self.loader.dynamics_channels and layer_name in self.loader.dynamics_channels:
+                self.loader.calculate_single_layer(layer_name)
+            else:
+                self.calculate()
         except Exception as e:
             messagebox.showerror("Ошибка загрузки", str(e))
             self.status_var.set("Ошибка загрузки")
@@ -1050,7 +1054,11 @@ class DinamikaApp:
             else:
                 self.file_label.configure(text=f"Тарировка: {self._calibration_file_path.name}")
 
-            self.calculate()
+            # Расчёт только для конкретного слоя вместо пересчета всех
+            if self.loader.dynamics_channels and layer_name in self.loader.dynamics_channels:
+                self.loader.calculate_single_layer(layer_name)
+            else:
+                self.calculate()
         except Exception as e:
             messagebox.showerror("Ошибка загрузки", str(e))
             self.status_var.set("Ошибка загрузки")
@@ -1146,7 +1154,11 @@ class DinamikaApp:
             else:
                 self.file_label.configure(text=f"Тарировка: {self._calibration_file_path.name}")
 
-            self.calculate()
+            # Расчёт только для конкретного слоя вместо пересчета всех
+            if self.loader.dynamics_channels and layer_name in self.loader.dynamics_channels:
+                self.loader.calculate_single_layer(layer_name)
+            else:
+                self.calculate()
         except Exception as e:
             messagebox.showerror("Ошибка загрузки", str(e))
             self.status_var.set("Ошибка загрузки")
