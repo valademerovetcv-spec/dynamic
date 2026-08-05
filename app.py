@@ -1354,6 +1354,43 @@ class DinamikaApp:
         # Очистка дерева результатов
         self.tree_result.delete(*self.tree_result.get_children())
         
+        # Очистка окна "Выбор тарировки"
+        for w in self.calib_sel_inner.winfo_children():
+            w.destroy()
+        ttk.Label(self.calib_sel_inner,
+                  text="Загрузите тарировку и выполните расчёт",
+                  background=PANEL_BG, foreground="#94a3b8",
+                  font=("Segoe UI", 10, "italic")).pack(padx=8, pady=12)
+        if hasattr(self, 'calib_sel_info_label'):
+            self.calib_sel_info_label.configure(text="")
+        
+        # Очистка вкладки "Анализ деформаций"
+        if hasattr(self, 'deformation_notebook'):
+            while self.deformation_notebook.index("end") != 0:
+                self.deformation_notebook.forget(0)
+            default_frame = ttk.Frame(self.deformation_notebook)
+            self.deformation_notebook.add(default_frame, text="  Нет данных  ")
+            # Очищаем содержимое фрейма анализа деформаций
+            for w in self.deform_inner.winfo_children():
+                if w != self.deformation_notebook:
+                    w.destroy()
+            # Восстанавливаем панель управления
+            deform_ctrl_frame = ttk.Frame(self.deform_inner)
+            deform_ctrl_frame.pack(side=tk.TOP, fill=tk.X, padx=4, pady=(4, 0))
+            ttk.Label(deform_ctrl_frame, text="Скорость, км/ч:").pack(side=tk.LEFT, padx=(15, 5))
+            self.deform_speed_var = tk.StringVar(value=str(SPEED_KMH_DEFAULT))
+            self.deform_speed_entry = ttk.Entry(deform_ctrl_frame, textvariable=self.deform_speed_var, width=8)
+            self.deform_speed_entry.pack(side=tk.LEFT)
+            ttk.Label(deform_ctrl_frame, text="Порог, σ:").pack(side=tk.LEFT, padx=(15, 5))
+            self.deform_threshold_var = tk.StringVar(value=str(THRESHOLD_SIGMA_DEFAULT))
+            self.deform_threshold_entry = ttk.Entry(deform_ctrl_frame, textvariable=self.deform_threshold_var, width=8)
+            self.deform_threshold_entry.pack(side=tk.LEFT)
+            ttk.Label(deform_ctrl_frame, text="Расстояние между осями, м:").pack(side=tk.LEFT, padx=(15, 5))
+            self.deform_axis_distance_var = tk.StringVar(value="2.5")
+            self.deform_axis_distance_entry = ttk.Entry(deform_ctrl_frame, textvariable=self.deform_axis_distance_var, width=8)
+            self.deform_axis_distance_entry.pack(side=tk.LEFT)
+            self.deformation_notebook.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        
         # Обновление UI
         self._update_channel_toggles()
         self._update_calib_selection_panel()
