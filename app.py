@@ -2794,6 +2794,8 @@ class DinamikaApp:
         self.peak_canvas.draw()
 
     def _clear_peak_chart(self):
+        if not hasattr(self, 'peak_ax') or self.peak_ax is None:
+            return
         self.peak_ax.clear()
         self.peak_ax.set_title("Профиль пиков")
         self.peak_ax.text(0.5, 0.5, "Выберите диапазон\nна графике",
