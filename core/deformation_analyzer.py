@@ -308,16 +308,19 @@ class DeformationAnalyzer:
         # Это нужно чтобы отсечь мелкие локальные экстремумы и найти два основных пика
         strong_peaks = [(t, v) for t, v in peaks if v > 0.05]
         
-        # Сортируем пики по амплитуде (наибольшие сначала)
-        strong_peaks_sorted = sorted(strong_peaks, key=lambda x: x[1], reverse=True)
+        # Сортируем пики по времени
+        strong_peaks.sort(key=lambda x: x[0])
         
-        # Берем два наибольших пика по амплитуде
-        top_two_peaks = strong_peaks_sorted[:2]
-        
-        # Сортируем выбранные пики по времени (первый пик должен быть раньше второго)
-        top_two_peaks.sort(key=lambda x: x[0])
-        
-        selected_peaks = top_two_peaks
+        # Берем два первых пика, разделённых минимум 50 мс (чтобы игнорировать близкие локальные экстремумы)
+        min_gap_ms = 50.0
+        selected_peaks = []
+        for peak in strong_peaks:
+            if not selected_peaks:
+                selected_peaks.append(peak)
+            elif peak[0] - selected_peaks[-1][0] >= min_gap_ms:
+                selected_peaks.append(peak)
+            if len(selected_peaks) == 2:
+                break
         
         first_two_peak_times = []
         if len(selected_peaks) >= 2:
