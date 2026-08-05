@@ -296,22 +296,28 @@ class DeformationAnalyzer:
         bottom_layer_idx = self.n_layers - 1
         bottom_layer_def = zone_def[:, bottom_layer_idx]
         
-        # Находим локальные минимумы (прогибы вниз) - т.к. данные для отображения переворачиваются (-1),
-        # то на графике они будут выглядеть как пики вверх
+        # Находим локальные максимумы - данные уже центрированы (положительные значения),
+        # а для отображения их переворачивают с -1, поэтому ищем максимумы в центрированных данных
+        # (которые на графике будут выглядеть как пики вверх после переворота)
         peaks = []
         for i in range(1, len(bottom_layer_def)-1):
-            if bottom_layer_def[i] < bottom_layer_def[i-1] and bottom_layer_def[i] < bottom_layer_def[i+1]:
+            if bottom_layer_def[i] > bottom_layer_def[i-1] and bottom_layer_def[i] > bottom_layer_def[i+1]:
                 peaks.append((zone_time[i], bottom_layer_def[i]))
         
-        # Сортируем пики по амплитуде (по модулю, наибольшие прогибы сначала)
-        # Т.к. значения отрицательные (прогибы вниз), берём по абсолютному значению
-        peaks_sorted = sorted(peaks, key=lambda x: abs(x[1]), reverse=True)
+        # Фильтруем по амплитуде (берем только сильные пики, например > 0.05 мм)
+        # Это нужно чтобы отсечь мелкие локальные экстремумы и найти два основных пика
+        strong_peaks = [(t, v) for t, v in peaks if v > 0.05]
         
-        # Берем два наибольших пика (с максимальной амплитудой)
-        selected_peaks = peaks_sorted[:2]
+        # Сортируем пики по амплитуде (наибольшие сначала)
+        strong_peaks_sorted = sorted(strong_peaks, key=lambda x: x[1], reverse=True)
+        
+        # Берем два наибольших пика по амплитуде
+        top_two_peaks = strong_peaks_sorted[:2]
         
         # Сортируем выбранные пики по времени (первый пик должен быть раньше второго)
-        selected_peaks.sort(key=lambda x: x[0])
+        top_two_peaks.sort(key=lambda x: x[0])
+        
+        selected_peaks = top_two_peaks
         
         first_two_peak_times = []
         if len(selected_peaks) >= 2:
