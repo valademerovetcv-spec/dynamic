@@ -374,36 +374,43 @@ class XLSXLoader:
             }
     
     def _find_rising_range(self, disp, values):
-        """Поиск возрастающего участка на калибровочной кривой."""
+        """Поиск основного возрастающего участка на калибровочной кривой."""
         tug = np.asarray(values, dtype=float)
         d = np.asarray(disp, dtype=float)
         n = min(len(tug), len(d))
         if n < 3:
             return (float(np.min(d)), float(np.max(d)))
         
-        # Находим участок монотонного возрастания сигнала датчика
-        # Ищем где сигнал начинает расти и где заканчивает расти
+        # Находим все участки монотонного возрастания сигнала датчика
         diff = np.diff(tug[:n])
         
-        # Находим первый индекс где diff > 0 (сигнал начал расти)
-        rising_start = 0
+        # Ищем непрерывные участки где diff > 0
+        rising_segments = []
+        start_idx = None
+        
         for i in range(len(diff)):
             if diff[i] > 0:
-                rising_start = i
-                break
+                if start_idx is None:
+                    start_idx = i
+            else:
+                if start_idx is not None:
+                    # Завершаем текущий участок
+                    rising_segments.append((start_idx, i))
+                    start_idx = None
         
-        # Находим последний индекс где diff > 0 (сигнал ещё растёт)
-        rising_end = n - 1
-        for i in range(len(diff) - 1, -1, -1):
-            if diff[i] > 0:
-                rising_end = i + 1
-                break
+        # Если последний участок продолжается до конца
+        if start_idx is not None:
+            rising_segments.append((start_idx, len(diff)))
         
-        # Если не нашли возрастание, возвращаем полный диапазон
-        if rising_start >= rising_end:
+        # Если не нашли ни одного участка возрастания, возвращаем полный диапазон
+        if not rising_segments:
             return (float(np.min(d)), float(np.max(d)))
         
-        # Возвращаем диапазон перемещений соответствующий участку возрастания
+        # Выбираем самый длинный участок возрастания
+        longest_segment = max(rising_segments, key=lambda x: x[1] - x[0])
+        rising_start, rising_end = longest_segment
+        
+        # Возвращаем диапазон перемещений соответствующий основному участку возрастания
         return (float(d[rising_start]), float(d[rising_end]))
     
     def _merge_rising_ranges(self, ranges):
