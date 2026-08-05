@@ -714,6 +714,31 @@ class Calculator:
         if not self.loader.dynamics_channels or layer_name not in self.loader.dynamics_channels:
             return self.loader.result_df
         
+        # Сначала определяем датчик для этого слоя если ещё не определён
+        if not hasattr(self.loader, '_per_layer_selected_sensor') or not self.loader._per_layer_selected_sensor:
+            self.loader._per_layer_selected_sensor = {}
+        if not hasattr(self.loader, '_per_layer_magnet_x') or not self.loader._per_layer_magnet_x:
+            self.loader._per_layer_magnet_x = {}
+        
+        # Вычисляем датчик только для текущего слоя если он ещё не выбран
+        if layer_name not in self.loader._per_layer_selected_sensor:
+            cal = self.loader.per_layer_calib[layer_name]
+            disp = cal["disp"]
+            tug_dict = cal["tug"]
+            
+            # Используем MagnetLocator для выбора лучшего датчика
+            resolved = MagnetLocator.resolve_calib_by_intersections(disp, tug_dict)
+            auto_sensor = resolved.get('selected_sensor')
+            if not auto_sensor or auto_sensor not in tug_dict:
+                auto_sensor = list(tug_dict.keys())[0]
+            
+            self.loader._per_layer_selected_sensor[layer_name] = auto_sensor
+            
+            # Также вычисляем положение магнита для этого слоя
+            magnet_x = resolved.get('magnet_x')
+            if magnet_x is not None:
+                self.loader._per_layer_magnet_x[layer_name] = float(magnet_x)
+        
         time_vals = self.loader.dynamics_time
         tugriki_vals = self.loader.dynamics_channels[layer_name]
         cal = self.loader.per_layer_calib[layer_name]
