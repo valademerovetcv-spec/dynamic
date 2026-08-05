@@ -291,44 +291,44 @@ class DeformationAnalyzer:
         peak_time = zone_time[peak_idx]
         peak_vals = zone_def[peak_idx, np.arange(self.n_layers)]
 
-        # Поиск двух пиков на самом нижнем слое для расчёта скорости по расстоянию между осями
+        # Поиск двух последовательных пиков на самом нижнем слое для расчёта скорости по расстоянию между осями
         # Берём самый нижний слой (последний в массиве данных)
         bottom_layer_idx = self.n_layers - 1
         bottom_layer_def = zone_def[:, bottom_layer_idx]
         
-        # Находим локальные максимумы - данные уже центрированы (положительные значения),
-        # а для отображения их переворачивают с -1, поэтому ищем максимумы в центрированных данных
-        # (которые на графике будут выглядеть как пики вверх после переворота)
-        peaks = []
+        # Ищем локальные максимумы (пики) на нижнем слое
+        # Данные уже центрированы и положительные значения соответствуют прогибу
+        peak_indices = []
         for i in range(1, len(bottom_layer_def)-1):
+            # Ищем локальные максимумы (больше соседей)
             if bottom_layer_def[i] > bottom_layer_def[i-1] and bottom_layer_def[i] > bottom_layer_def[i+1]:
-                peaks.append((zone_time[i], bottom_layer_def[i]))
+                # Фильтруем по минимальной амплитуде (отсекаем шум)
+                if bottom_layer_def[i] > 0.03:  # порог 0.03 мм
+                    peak_indices.append(i)
         
-        # Фильтруем по амплитуде (берем только сильные пики, например > 0.05 мм)
-        # Это нужно чтобы отсечь мелкие локальные экстремумы и найти два основных пика
-        strong_peaks = [(t, v) for t, v in peaks if v > 0.05]
-        
-        # Сортируем пики по времени
-        strong_peaks.sort(key=lambda x: x[0])
-        
-        # Берем два первых пика, разделённых минимум 50 мс (чтобы игнорировать близкие локальные экстремумы)
-        min_gap_ms = 50.0
-        selected_peaks = []
-        for peak in strong_peaks:
-            if not selected_peaks:
-                selected_peaks.append(peak)
-            elif peak[0] - selected_peaks[-1][0] >= min_gap_ms:
-                selected_peaks.append(peak)
-            if len(selected_peaks) == 2:
-                break
-        
-        first_two_peak_times = []
-        if len(selected_peaks) >= 2:
-            first_two_peak_times = [selected_peaks[0][0], selected_peaks[1][0]]
-        elif len(selected_peaks) == 1:
-            first_two_peak_times = [selected_peaks[0][0], None]
-        else:
+        # Если пиков меньше 2, не можем рассчитать скорость
+        if len(peak_indices) < 2:
             first_two_peak_times = [None, None]
+        else:
+            # Сортируем пики по времени (по индексу)
+            peak_indices_sorted = sorted(peak_indices)
+            
+            # Фильтруем пики с минимальным зазором 100 мс (чтобы отбросить близкие локальные экстремумы)
+            min_gap_points = self.ms_to_points(100.0)
+            filtered_peaks = []
+            for idx in peak_indices_sorted:
+                if not filtered_peaks or (idx - filtered_peaks[-1]) >= min_gap_points:
+                    filtered_peaks.append(idx)
+            
+            # Если после фильтрации осталось меньше 2 пиков, берем первые два из отсортированных
+            if len(filtered_peaks) < 2:
+                first_peak_idx = peak_indices_sorted[0]
+                second_peak_idx = peak_indices_sorted[1]
+            else:
+                first_peak_idx = filtered_peaks[0]
+                second_peak_idx = filtered_peaks[1]
+            
+            first_two_peak_times = [zone_time[first_peak_idx], zone_time[second_peak_idx]]
 
         # Самый большой пик среди всех слоёв
         flat_idx = int(np.nanargmax(np.abs(zone_def)))
