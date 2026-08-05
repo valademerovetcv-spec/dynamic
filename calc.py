@@ -36,6 +36,10 @@ class DataLoaderWithCalc(DataLoader):
     def calculate_per_layer_magnet(self):
         return self._calculator.calculate_per_layer_magnet()
     
+    def calculate_single_layer(self, layer_name, progress_callback=None):
+        """Расчёт только для конкретного слоя."""
+        return self._calculator.calculate_single_layer(layer_name, progress_callback)
+    
     def set_manual_zero(self, value):
         self._calculator.set_manual_zero(value)
     
