@@ -738,6 +738,23 @@ class Calculator:
             magnet_x = resolved.get('magnet_x')
             if magnet_x is not None:
                 self.loader._per_layer_magnet_x[layer_name] = float(magnet_x)
+            
+            # Сохраняем информацию о калибровке для интерфейса
+            auto_range = self.loader._per_layer_auto_range.get(layer_name, (0.0, 0.0))
+            if not hasattr(self.loader, '_per_layer_calib_info') or self.loader._per_layer_calib_info is None:
+                self.loader._per_layer_calib_info = {}
+            
+            self.loader._per_layer_calib_info[layer_name] = {
+                "sensor": auto_sensor,
+                "range_left": auto_range[0],
+                "range_right": auto_range[1],
+                "auto_sensor": auto_sensor,
+                "auto_range_left": auto_range[0],
+                "auto_range_right": auto_range[1],
+                "manual_sensor": False,
+                "manual_range": False,
+                "magnet_x": self.loader._per_layer_magnet_x.get(layer_name),
+            }
         
         time_vals = self.loader.dynamics_time
         tugriki_vals = self.loader.dynamics_channels[layer_name]
