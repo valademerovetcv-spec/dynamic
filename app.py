@@ -310,6 +310,10 @@ class DinamikaApp:
                                               command=self._analyze_deformations)
         self.analyze_deform_btn.pack(side=tk.LEFT, padx=3, pady=6)
 
+        # Кнопка очистки всех данных
+        ttk.Button(tb, text="🗑 Очистить все", style="Toolbar.TButton",
+                   command=self._clear_all_data).pack(side=tk.LEFT, padx=3, pady=6)
+
         self.file_label = ttk.Label(tb, text="Файл не загружен", style="Header.TLabel")
         self.file_label.pack(side=tk.RIGHT, padx=15)
 
@@ -1296,6 +1300,68 @@ class DinamikaApp:
             self.file_label.configure(text="Файл не загружен")
         self.status_var.set("Тарировка сброшена")
         self._update_calib_selection_panel()
+
+    def _clear_all_data(self):
+        """Полная очистка всех данных (динамика, тарировка, температуры)."""
+        # Сброс динамики
+        self._reset_dynamics()
+        
+        # Сброс тарировки
+        self.loader.calib_channels = None
+        self.loader.calib_disp = None
+        self.loader.calib_data = None
+        self.loader.per_layer_calib = {}
+        self.loader._per_layer_calib_info = {}
+        self.loader._per_layer_manual = {}
+        self.loader._global_calib_info = {}
+        self.loader._global_calib_manual = {}
+        self.loader.calib_branches = None
+        self.loader.trimmed_calib = None
+        self._calibration_file_path = None
+        
+        for t in self._calib_tabs.values():
+            self.calib_notebook.forget(t)
+        self._calib_tabs.clear()
+        
+        # Сброс температур
+        self.loader.temp_data = None
+        self.loader.temp_channels = None
+        self.loader.temp_time = None
+        self._temp_file_path = None
+        
+        # Очистка дерева температур
+        if hasattr(self, 'temp_tree'):
+            self.temp_tree.delete(*self.temp_tree.get_children())
+        
+        # Очистка переключателей каналов температур
+        if hasattr(self, 'temp_toggle_frame'):
+            for w in self.temp_toggle_frame.winfo_children():
+                w.destroy()
+        
+        # Сброс путей к файлам
+        self._file_path = None
+        self._dynamics_file_path = None
+        self._calibration_file_path = None
+        self._temp_file_path = None
+        
+        # Перерисовка всех графиков
+        self._draw_raw_chart()
+        self._draw_magnet_chart()
+        self._draw_result_chart()
+        self._draw_disp_chart()
+        self._clear_peak_chart()
+        
+        # Очистка дерева результатов
+        self.tree_result.delete(*self.tree_result.get_children())
+        
+        # Обновление UI
+        self._update_channel_toggles()
+        self._update_calib_selection_panel()
+        self.file_label.configure(text="Файл не загружен")
+        self.status_var.set("Все данные очищены")
+        
+        # Показываем toast-уведомление
+        self._show_toast("Очистка завершена", "Все данные были успешно очищены. Можно загружать новые файлы.", duration_ms=2000)
 
     def _update_calib_selection_panel(self):
         for w in self.calib_sel_inner.winfo_children():
