@@ -324,9 +324,12 @@ class XLSXLoader:
         if not hasattr(self, 'per_layer_calib') or self.per_layer_calib is None:
             self.per_layer_calib = {}
         
-        # Инициализируем словарь для информации о калибровке
+        # Инициализируем словари для информации о калибровке
         if not hasattr(self, '_per_layer_calib_info') or self._per_layer_calib_info is None:
             self._per_layer_calib_info = {}
+        
+        if not hasattr(self, '_per_layer_auto_range') or self._per_layer_auto_range is None:
+            self._per_layer_auto_range = {}
         
         # Быстрая загрузка файла
         if path.lower().endswith('.xlsx'):
@@ -351,17 +354,70 @@ class XLSXLoader:
         # Сохраняем данные
         self.per_layer_calib[layer_name] = {"disp": disp_col, "tug": tug_cols}
         
+        # Вычисляем автоматический диапазон перекрытия
+        auto_left, auto_right = self._find_layer_overlap(disp_col, tug_cols)
+        self._per_layer_auto_range[layer_name] = (auto_left, auto_right)
+        
         # Сохраняем информацию о загруженной калибровке для быстрого доступа
         sensor_names = list(tug_cols.keys())
         if sensor_names:
             self._per_layer_calib_info[layer_name] = {
                 "sensor": sensor_names[0],
-                "range_left": None,  # Будет вычислено при необходимости
-                "range_right": None,
+                "range_left": auto_left,
+                "range_right": auto_right,
                 "auto_sensor": sensor_names[0],
-                "auto_range_left": None,
-                "auto_range_right": None,
+                "auto_range_left": auto_left,
+                "auto_range_right": auto_right,
                 "manual_sensor": False,
                 "manual_range": False,
                 "magnet_x": None,
             }
+    
+    def _find_rising_range(self, disp, values):
+        """Поиск возрастающего участка на калибровочной кривой."""
+        tug = np.asarray(values, dtype=float)
+        d = np.asarray(disp, dtype=float)
+        n = min(len(tug), len(d))
+        if n < 3:
+            return (float(np.min(d)), float(np.max(d)))
+        
+        # Находим участок монотонного возрастания
+        diff = np.diff(tug[:n])
+        rising_start = 0
+        rising_end = n - 1
+        
+        for i in range(len(diff)):
+            if diff[i] > 0:
+                rising_start = i
+                break
+        
+        for i in range(len(diff) - 1, -1, -1):
+            if diff[i] > 0:
+                rising_end = i + 1
+                break
+        
+        return (float(d[rising_start]), float(d[rising_end]))
+    
+    def _merge_rising_ranges(self, ranges):
+        """Объединение нескольких диапазонов в общий."""
+        if not ranges:
+            return (0.0, 0.0)
+        
+        valid_ranges = [r for r in ranges if r is not None]
+        if not valid_ranges:
+            return (0.0, 0.0)
+        
+        left = max(r[0] for r in valid_ranges)
+        right = min(r[1] for r in valid_ranges)
+        
+        if left >= right:
+            # Если нет перекрытия, берём средний диапазон
+            left = np.mean([r[0] for r in valid_ranges])
+            right = np.mean([r[1] for r in valid_ranges])
+        
+        return (left, right)
+    
+    def _find_layer_overlap(self, disp, tug_dict):
+        """Поиск области перекрытия для конкретного слоя."""
+        ranges = [self._find_rising_range(disp, tv) for tv in tug_dict.values()]
+        return self._merge_rising_ranges(ranges)
