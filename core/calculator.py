@@ -731,10 +731,14 @@ class Calculator:
     @profile_time
     def calculate_single_layer(self, layer_name, progress_callback=None):
         """Расчёт перемещений только для конкретного слоя."""
+        logger.info(f"[PROFILING] calculate_single_layer: Начало для слоя {layer_name}")
+        
         if not self.loader.per_layer_calib or layer_name not in self.loader.per_layer_calib:
+            logger.warning(f"[PROFILING] calculate_single_layer: Нет калибровки для слоя {layer_name}")
             return self.loader.result_df
         
         if not self.loader.dynamics_channels or layer_name not in self.loader.dynamics_channels:
+            logger.warning(f"[PROFILING] calculate_single_layer: Нет данных динамики для слоя {layer_name}")
             return self.loader.result_df
         
         # Сначала определяем датчик для этого слоя если ещё не определён
@@ -745,6 +749,7 @@ class Calculator:
         
         # Вычисляем датчик только для текущего слоя если он ещё не выбран
         if layer_name not in self.loader._per_layer_selected_sensor:
+            logger.info(f"[PROFILING] calculate_single_layer: Вычисление датчика для слоя {layer_name}")
             cal = self.loader.per_layer_calib[layer_name]
             disp = cal["disp"]
             tug_dict = cal["tug"]
@@ -778,6 +783,7 @@ class Calculator:
                 "manual_range": False,
                 "magnet_x": self.loader._per_layer_magnet_x.get(layer_name),
             }
+            logger.info(f"[PROFILING] calculate_single_layer: Датчик выбран: {auto_sensor}, диапазон: {auto_range[0]:.2f}-{auto_range[1]:.2f}")
         
         time_vals = self.loader.dynamics_time
         tugriki_vals = self.loader.dynamics_channels[layer_name]
@@ -785,8 +791,10 @@ class Calculator:
         auto_range = self.loader._per_layer_auto_range.get(layer_name)
         manual = self.loader._per_layer_manual.get(layer_name, {})
         
+        logger.info(f"[PROFILING] calculate_single_layer: Запуск _calc_layer_worker")
         # Расчёт для одного слоя
         dn, result_disp, calib_info = self._calc_layer_worker((layer_name, tugriki_vals, cal, auto_range, manual))
+        logger.info(f"[PROFILING] calculate_single_layer: _calc_layer_worker завершён")
         
         # Обновляем только информацию для этого слоя
         if not hasattr(self.loader, '_per_layer_calib_info') or self.loader._per_layer_calib_info is None:
@@ -799,6 +807,7 @@ class Calculator:
         self.loader.result_channels_raw[layer_name] = result_disp
         
         # Находим baseline для этого слоя
+        logger.info(f"[PROFILING] calculate_single_layer: Вычисление baseline")
         layer_baseline = SignalAnalyzer.find_baseline(result_disp)
         
         if not hasattr(self.loader, 'channel_baselines') or self.loader.channel_baselines is None:
@@ -825,6 +834,7 @@ class Calculator:
             )
         
         # Обновляем result_df
+        logger.info(f"[PROFILING] calculate_single_layer: Обновление result_df")
         self.loader.result_df = pd.DataFrame({
             "Время, мсек": time_vals,
             "Перемещение, мм": result_disp
@@ -832,6 +842,8 @@ class Calculator:
         
         if progress_callback:
             progress_callback(1, 1)
+        
+        logger.info(f"[PROFILING] calculate_single_layer: Завершено для слоя {layer_name}")
         
         return self.loader.result_df
     

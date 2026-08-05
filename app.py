@@ -2055,6 +2055,17 @@ class DinamikaApp:
                                 font=("Consolas", 9), justify=tk.LEFT)
         delta_label.pack(padx=4, pady=4)
         
+        # Панель со значениями ΔY под курсором
+        cursor_delta_frame = ttk.LabelFrame(info_frame, text=" ΔY под курсором ")
+        cursor_delta_frame.pack(side=tk.RIGHT, padx=4, pady=4)
+        
+        cursor_delta_lbl = ttk.Label(cursor_delta_frame, text="—",
+                                     font=("Consolas", 9), justify=tk.LEFT)
+        cursor_delta_lbl.pack(padx=4, pady=4)
+        
+        # Сохраняем ссылку на label для обновления
+        tab_data["cursor_delta_label"] = cursor_delta_lbl
+        
         # Панель с текущими значениями под курсором
         cursor_panel = ttk.LabelFrame(frame, text=" Значения под курсором ")
         cursor_panel.pack(fill=tk.X, padx=4, pady=4)
@@ -2243,6 +2254,19 @@ class DinamikaApp:
             for i, lbl in enumerate(layer_labels):
                 if i < len(vals):
                     lbl.config(text=f"{vals[i]:+.3f}")
+        
+        # Обновляем панель с ΔY под курсором
+        cursor_delta_lbl = tab_data.get("cursor_delta_label")
+        if cursor_delta_lbl and self.deformation_analyzer:
+            delta_texts = []
+            for i in range(self.deformation_analyzer.n_layers - 1):
+                if i < len(vals) and (i + 1) < len(vals):
+                    delta = vals[i] - vals[i + 1]
+                    layer1 = self.deformation_analyzer.layer_names[i]
+                    layer2 = self.deformation_analyzer.layer_names[i + 1]
+                    delta_texts.append(f"{layer1}→{layer2}: {delta:+.4f} мм")
+            if delta_texts:
+                cursor_delta_lbl.config(text="\n".join(delta_texts))
 
     # === Peak selection methods ===
 
