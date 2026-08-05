@@ -1,11 +1,4 @@
 ```
-# Python cache
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-
-# Build artifacts
-core/__pycache__/
-models/__pycache__/
 ```

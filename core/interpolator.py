@@ -4,6 +4,24 @@
 """
 import numpy as np
 from functools import lru_cache
+import time
+import logging
+from functools import wraps
+
+# Настройка логирования
+logger = logging.getLogger(__name__)
+
+
+def profile_time(func):
+    """Декоратор для логирования времени выполнения функции."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        start = time.perf_counter()
+        result = func(*args, **kwargs)
+        elapsed = time.perf_counter() - start
+        logger.info(f"{func.__name__} выполнено за {elapsed*1000:.2f} мс")
+        return result
+    return wrapper
 
 
 class Interpolator:
@@ -14,6 +32,7 @@ class Interpolator:
     _cache_max_size = 128
     
     @staticmethod
+    @profile_time
     def interp_linear(target, tug_vals, disp_vals):
         """
         Линейная интерполяция перемещения по значению датчика.
@@ -48,6 +67,7 @@ class Interpolator:
         return round(d0 + del3, 3)
 
     @staticmethod
+    @profile_time
     def calc_single_channel(tugriki_vals, calib_tugriki, calib_disp):
         """
         Расчёт перемещения для одного канала с использованием векторизованной интерполяции.
@@ -98,6 +118,7 @@ class Interpolator:
         return np.round(result, 3)
 
     @staticmethod
+    @profile_time
     def calc_single_channel_optimized(tugriki_vals, calib_tugriki, calib_disp):
         """
         Оптимизированный расчёт перемещения с кэшированием сортировки калибровки.
@@ -141,6 +162,7 @@ class Interpolator:
         return np.round(result, 3)
     
     @staticmethod
+    @profile_time
     def calc_multi_channels_vectorized(tugriki_matrix, calib_tugriki, calib_disp):
         """
         Векторизованный расчёт перемещений для нескольких каналов одновременно.
@@ -234,6 +256,7 @@ class Interpolator:
         return cal_disp, cal_tug
     
     @staticmethod
+    @profile_time
     def prepare_calib_branch(disp, tug, range_left=None, range_right=None):
         """
         Предварительная подготовка калибровочных данных с кэшированием.
@@ -289,11 +312,13 @@ class Interpolator:
         }
     
     @staticmethod
+    @profile_time
     def clear_cache():
         """Очистка кэша калибровочных данных."""
         Interpolator._calib_cache.clear()
     
     @staticmethod
+    @profile_time
     def prepare_calib_cached(sensor_name, disp, tug, range_left=None, range_right=None):
         """
         Подготовка калибровочных данных с кэшированием по имени сенсора.
