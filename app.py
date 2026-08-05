@@ -1315,6 +1315,7 @@ class DinamikaApp:
         # Дополнительный сброс переменных loader
         self.loader.result_df = None
         self.loader.result_channels = None
+        self.loader.result_channels_raw = None
         self.loader.magnet_position = None
         self.loader.magnet_info = ""
         self.loader.zero_point = None
@@ -1324,6 +1325,11 @@ class DinamikaApp:
         self.loader.channel_baselines = None
         self.loader._magnet_intersections = {}
         self.loader._magnet_x = None
+        self.loader.dynamics_channels = None
+        self.loader.dynamics_time = None
+        self.loader.source_data = None
+        self.loader.calib_branches = None
+        self.loader.trimmed_calib = None
         
         # Сброс тарировки
         self.loader.calib_channels = None
@@ -1378,9 +1384,10 @@ class DinamikaApp:
         # Очистка дерева результатов
         self.tree_result.delete(*self.tree_result.get_children())
         
-        # Очистка окна "Выбор тарировки"
+        # Полная очистка и пересоздание содержимого "Выбор тарировки"
         for w in self.calib_sel_inner.winfo_children():
             w.destroy()
+        self._calib_sel_widgets.clear()
         ttk.Label(self.calib_sel_inner,
                   text="Загрузите тарировку и выполните расчёт",
                   background=PANEL_BG, foreground="#94a3b8",
@@ -1388,17 +1395,21 @@ class DinamikaApp:
         if hasattr(self, 'calib_sel_info_label'):
             self.calib_sel_info_label.configure(text="")
         
-        # Очистка вкладки "Анализ деформаций"
+        # Полная очистка и пересоздание вкладки "Анализ деформаций"
         if hasattr(self, 'deformation_notebook'):
-            while self.deformation_notebook.index("end") != 0:
-                self.deformation_notebook.forget(0)
+            # Удаляем все вкладки
+            for tab_id in list(self.deformation_notebook.tabs()):
+                self.deformation_notebook.forget(tab_id)
+            # Создаем новую вкладку по умолчанию
             default_frame = ttk.Frame(self.deformation_notebook)
             self.deformation_notebook.add(default_frame, text="  Нет данных  ")
-            # Очищаем содержимое фрейма анализа деформаций
-            for w in self.deform_inner.winfo_children():
+            
+            # Очищаем всё содержимое deform_inner кроме notebook
+            for w in list(self.deform_inner.winfo_children()):
                 if w != self.deformation_notebook:
                     w.destroy()
-            # Восстанавливаем панель управления
+            
+            # Восстанавливаем панель управления с параметрами
             deform_ctrl_frame = ttk.Frame(self.deform_inner)
             deform_ctrl_frame.pack(side=tk.TOP, fill=tk.X, padx=4, pady=(4, 0))
             ttk.Label(deform_ctrl_frame, text="Скорость, км/ч:").pack(side=tk.LEFT, padx=(15, 5))
