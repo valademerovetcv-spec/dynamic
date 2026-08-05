@@ -381,21 +381,29 @@ class XLSXLoader:
         if n < 3:
             return (float(np.min(d)), float(np.max(d)))
         
-        # Находим участок монотонного возрастания
+        # Находим участок монотонного возрастания сигнала датчика
+        # Ищем где сигнал начинает расти и где заканчивает расти
         diff = np.diff(tug[:n])
-        rising_start = 0
-        rising_end = n - 1
         
+        # Находим первый индекс где diff > 0 (сигнал начал расти)
+        rising_start = 0
         for i in range(len(diff)):
             if diff[i] > 0:
                 rising_start = i
                 break
         
+        # Находим последний индекс где diff > 0 (сигнал ещё растёт)
+        rising_end = n - 1
         for i in range(len(diff) - 1, -1, -1):
             if diff[i] > 0:
                 rising_end = i + 1
                 break
         
+        # Если не нашли возрастание, возвращаем полный диапазон
+        if rising_start >= rising_end:
+            return (float(np.min(d)), float(np.max(d)))
+        
+        # Возвращаем диапазон перемещений соответствующий участку возрастания
         return (float(d[rising_start]), float(d[rising_end]))
     
     def _merge_rising_ranges(self, ranges):
