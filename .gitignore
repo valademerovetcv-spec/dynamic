@@ -1,1 +1,4 @@
-(core/deformation_analyzer.py)
+```
+__pycache__/
+*.pyc
+```

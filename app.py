@@ -2115,6 +2115,27 @@ class DinamikaApp:
             t1 = result['first_two_peak_times'][0]
             t2 = result['first_two_peak_times'][1]
             if t2 is not None:
+                # Получаем значения амплитуд пиков из данных
+                bottom_layer_idx = self.deformation_analyzer.n_layers - 1
+                s = result['start_idx']
+                e = result['end_idx']
+                zone_def = result['defs']
+                zone_time = result['time']
+                
+                # Находим индексы пиков в зоне
+                idx1 = np.where(zone_time == t1)[0][0]
+                idx2 = np.where(zone_time == t2)[0][0]
+                
+                # Значения амплитуд (до переворота знака, оригинальные центрированные данные)
+                v1 = zone_def[idx1, bottom_layer_idx]
+                v2 = zone_def[idx2, bottom_layer_idx]
+                
+                # Вывод информации о пиках
+                peaks_info_label = ttk.Label(peak_frame, 
+                    text=f"Пик 1: {t1:.1f} мс ({v1:.6f} мм)  |  Пик 2: {t2:.1f} мс ({v2:.6f} мм)",
+                    font=("Consolas", 9), foreground="#2563eb")
+                peaks_info_label.pack(padx=4, pady=2)
+                
                 dt = t2 - t1  # мс
                 try:
                     axis_distance = float(self.deform_axis_distance_var.get())
@@ -2130,7 +2151,7 @@ class DinamikaApp:
                     
                     # Сохраняем ссылку на label для обновления при изменении расстояния
                     tab_data["speed_label"] = speed_label
-                    tab_data["speed_info_base"] = (t1, t2)
+                    tab_data["speed_info_base"] = (t1, t2, v1, v2)
                 else:
                     speed_label = ttk.Label(peak_frame, text=f"Δt между пиками: {dt:.1f} мс (некорректное значение)",
                                            font=("Consolas", 8), foreground="#dc2626")
