@@ -1410,6 +1410,9 @@ class DinamikaApp:
                 if w != self.deformation_notebook:
                     w.destroy()
             
+            # Сбрасываем ссылку на label статуса, так как он будет уничтожен
+            self.deform_status_label = None
+            
             # Восстанавливаем панель управления с параметрами
             deform_ctrl_frame = ttk.Frame(self.deform_inner)
             deform_ctrl_frame.pack(side=tk.TOP, fill=tk.X, padx=4, pady=(4, 0))
@@ -1903,13 +1906,18 @@ class DinamikaApp:
         self.result_ax.set_title("Перемещение от времени")
 
         # График "Перемещение от времени" должен показывать сырые данные (без центрирования)
-        if hasattr(self.loader, 'result_channels_raw') and self.loader.result_channels_raw:
+        # Проверяем, что dynamics_time существует и не пустой перед использованием
+        has_time_data = (hasattr(self.loader, 'dynamics_time') and 
+                         self.loader.dynamics_time is not None and 
+                         len(self.loader.dynamics_time) > 0)
+        
+        if hasattr(self.loader, 'result_channels_raw') and self.loader.result_channels_raw and has_time_data:
             visible_any = False
             for i, (ch_name, ch_data) in enumerate(self.loader.result_channels_raw.items()):
                 visible = True
                 if hasattr(self, '_result_vars') and ch_name in self._result_vars:
                     visible = self._result_vars[ch_name].get()
-                if visible:
+                if visible and ch_data is not None and len(ch_data) > 0:
                     color = CHANNEL_COLORS[i % len(CHANNEL_COLORS)]
                     self.result_ax.plot(self.loader.dynamics_time, ch_data,
                                         linewidth=0.6, color=color, label=ch_name, rasterized=True)
@@ -1961,6 +1969,10 @@ class DinamikaApp:
 
     def _analyze_deformations(self):
         """Анализ послойных деформаций с использованием данных перемещения от времени."""
+        # Проверяем существование виджета статуса перед использованием
+        if not hasattr(self, 'deform_status_label') or self.deform_status_label is None:
+            return
+            
         # Показываем пользователю, что анализ начался
         self.status_var.set("Выполнение анализа деформаций...")
         self.deform_status_label.configure(text="Анализ...")
