@@ -2030,10 +2030,29 @@ class DinamikaApp:
         canvas = FigureCanvasTkAgg(fig, master=chart_frame)
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         
-        # Toolbar для графика
+        # Toolbar для графика с инструментами навигации
         toolbar = NavigationToolbar2Tk(canvas, chart_frame)
         toolbar.update()
-        toolbar.pack_forget()  # Скрываем тулбар по умолчанию
+        
+        # Добавляем собственные кнопки для быстрого доступа
+        ttk.Separator(chart_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4, pady=4)
+        
+        # Кнопка "Сбросить вид"
+        reset_btn = ttk.Button(chart_frame, text="🔄 Сбросить вид", 
+                              command=lambda: self._reset_full_chart_view(ax, canvas))
+        reset_btn.pack(side=tk.LEFT, padx=2)
+        
+        # Кнопка "Выделить участок"
+        select_btn = ttk.Button(chart_frame, text="🔍 Выделить участок", 
+                               command=lambda: self._enable_zoom_selection(ax, canvas))
+        select_btn.pack(side=tk.LEFT, padx=2)
+        
+        # Кнопка "Показать все данные"
+        full_view_btn = ttk.Button(chart_frame, text="📊 Показать всё", 
+                                  command=lambda: self._show_full_data_view(ax, canvas, x, defs_centered))
+        full_view_btn.pack(side=tk.LEFT, padx=2)
+        
+        toolbar.pack(side=tk.TOP, fill=tk.X)
         
         # Подключаем обработчики событий для интерактивности
         canvas.mpl_connect("motion_notify_event", self._on_full_chart_motion)
@@ -2063,6 +2082,52 @@ class DinamikaApp:
         """Обработка движения мыши над полным графиком."""
         # Можно добавить отображение значений под курсором
         pass
+    
+    def _reset_full_chart_view(self, ax, canvas):
+        """Сбросить вид графика к исходному состоянию."""
+        ax.relim()
+        ax.autoscale_view()
+        canvas.draw_idle()
+    
+    def _enable_zoom_selection(self, ax, canvas):
+        """Включить режим выделения участка для зума."""
+        from matplotlib.widgets import RectangleSelector
+        self.current_ax = ax
+        self.current_canvas = canvas
+        
+        def onselect(eclick, erelease):
+            x1, y1 = eclick.xdata, eclick.ydata
+            x2, y2 = erelease.xdata, erelease.ydata
+            if x1 is None or x2 is None or y1 is None or y2 is None:
+                return
+            
+            xmin, xmax = min(x1, x2), max(x1, x2)
+            ymin, ymax = min(y1, y2), max(y1, y2)
+            
+            ax.set_xlim(xmin, xmax)
+            ax.set_ylim(ymin, ymax)
+            canvas.draw_idle()
+        
+        self.rect_selector = RectangleSelector(
+            ax, onselect,
+            drawtype='box',
+            useblit=True,
+            button=[1],  # Левая кнопка мыши
+            minspanx=5, minspany=5,
+            spancoords='pixels',
+            interactive=True
+        )
+    
+    def _show_full_data_view(self, ax, canvas, x, defs_centered):
+        """Показать все данные на графике (полный масштаб)."""
+        if len(x) > 0:
+            ax.set_xlim(x[0], x[-1])
+            # Вычисляем общие границы по всем слоям
+            all_data = np.abs(defs_centered)
+            data_min = -np.max(all_data) * 1.1
+            data_max = np.max(all_data) * 1.1
+            ax.set_ylim(data_min, data_max)
+            canvas.draw_idle()
 
     def _populate_deformation_tab(self, frame, result, zone_idx, speed_kmh):
         """Заполнение вкладки данными об участке."""
