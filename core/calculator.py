@@ -706,6 +706,71 @@ class Calculator:
         return dn, np.round(result_disp, 3), calib_info
 
     @profile_time
+    def calculate_single_layer(self, layer_name, progress_callback=None):
+        """Расчёт перемещений только для конкретного слоя."""
+        if not self.loader.per_layer_calib or layer_name not in self.loader.per_layer_calib:
+            return self.loader.result_df
+        
+        if not self.loader.dynamics_channels or layer_name not in self.loader.dynamics_channels:
+            return self.loader.result_df
+        
+        time_vals = self.loader.dynamics_time
+        tugriki_vals = self.loader.dynamics_channels[layer_name]
+        cal = self.loader.per_layer_calib[layer_name]
+        auto_range = self.loader._per_layer_auto_range.get(layer_name)
+        manual = self.loader._per_layer_manual.get(layer_name, {})
+        
+        # Расчёт для одного слоя
+        dn, result_disp, calib_info = self._calc_layer_worker((layer_name, tugriki_vals, cal, auto_range, manual))
+        
+        # Обновляем только информацию для этого слоя
+        if not hasattr(self.loader, '_per_layer_calib_info'):
+            self.loader._per_layer_calib_info = {}
+        self.loader._per_layer_calib_info[layer_name] = calib_info
+        
+        # Сохраняем сырые результаты
+        if not hasattr(self.loader, 'result_channels_raw'):
+            self.loader.result_channels_raw = {}
+        self.loader.result_channels_raw[layer_name] = result_disp
+        
+        # Находим baseline для этого слоя
+        layer_baseline = SignalAnalyzer.find_baseline(result_disp)
+        
+        if not hasattr(self.loader, 'channel_baselines'):
+            self.loader.channel_baselines = {}
+        self.loader.channel_baselines[layer_name] = layer_baseline
+        
+        if not hasattr(self.loader, 'channel_mins'):
+            self.loader.channel_mins = {}
+        self.loader.channel_mins[layer_name] = layer_baseline
+        
+        # Центрированный результат для графика "Пиковые значения"
+        centered_result = result_disp - layer_baseline
+        if not hasattr(self.loader, 'result_channels'):
+            self.loader.result_channels = {}
+        self.loader.result_channels[layer_name] = centered_result
+        
+        # Обновляем общий ноль
+        if self.loader.channel_baselines:
+            self.loader.auto_zero_point = min(self.loader.channel_baselines.values())
+            self.loader.zero_point = (
+                self.loader.manual_zero_point
+                if self.loader.manual_zero_point is not None
+                else self.loader.auto_zero_point
+            )
+        
+        # Обновляем result_df
+        self.loader.result_df = pd.DataFrame({
+            "Время, мсек": time_vals,
+            "Перемещение, мм": result_disp
+        })
+        
+        if progress_callback:
+            progress_callback(1, 1)
+        
+        return self.loader.result_df
+    
+    @profile_time
     def calculate_per_layer(self, progress_callback=None):
         """Расчёт перемещений для каждого слоя с использованием многопоточности."""
         if not self.loader.per_layer_calib or not self.loader.dynamics_channels:
