@@ -302,23 +302,20 @@ class DeformationAnalyzer:
             if bottom_layer_def[i] < bottom_layer_def[i-1] and bottom_layer_def[i] < bottom_layer_def[i+1]:
                 peaks.append((zone_time[i], bottom_layer_def[i]))
         
-        # Фильтруем по амплитуде (берем только сильные прогибы, например < -0.02)
-        strong_peaks = [(t, v) for t, v in peaks if v < -0.02]
+        # Сортируем пики по амплитуде (по модулю, наибольшие прогибы сначала)
+        peaks_sorted = sorted(peaks, key=lambda x: abs(x[1]), reverse=True)
         
-        # Если сильных пиков меньше 2, берем все пики и сортируем по амплитуде (наибольшие прогибы)
-        if len(strong_peaks) < 2:
-            # Сортируем все пики по амплитуде (по модулю, наибольшие сначала)
-            peaks_sorted = sorted(peaks, key=lambda x: abs(x[1]), reverse=True)
-            strong_peaks = peaks_sorted[:2]
+        # Берем два наибольших пика
+        selected_peaks = peaks_sorted[:2]
         
         # Сортируем выбранные пики по времени
-        strong_peaks.sort(key=lambda x: x[0])
+        selected_peaks.sort(key=lambda x: x[0])
         
         first_two_peak_times = []
-        if len(strong_peaks) >= 2:
-            first_two_peak_times = [strong_peaks[0][0], strong_peaks[1][0]]
-        elif len(strong_peaks) == 1:
-            first_two_peak_times = [strong_peaks[0][0], None]
+        if len(selected_peaks) >= 2:
+            first_two_peak_times = [selected_peaks[0][0], selected_peaks[1][0]]
+        elif len(selected_peaks) == 1:
+            first_two_peak_times = [selected_peaks[0][0], None]
         else:
             first_two_peak_times = [None, None]
 
