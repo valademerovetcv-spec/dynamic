@@ -61,6 +61,12 @@ def _style_app():
               background=[("active", "#22c55e"), ("!active", "#16a34a")],
               foreground=[("active", "#ffffff"), ("!active", "#ffffff")])
 
+    style.configure("ToolbarClear.TButton", background="#64748b", foreground="#ffffff",
+                     font=("Segoe UI", 10, "bold"), padding=(14, 7))
+    style.map("ToolbarClear.TButton",
+              background=[("active", "#475569"), ("!active", "#64748b")],
+              foreground=[("active", "#ffffff"), ("!active", "#ffffff")])
+
     style.configure("Header.TLabel", background="#1a1a2e", foreground="#ffffff",
                      font=("Segoe UI", 11, "bold"))
     style.configure("Status.TLabel", background="#e2e8f0", foreground="#475569",
@@ -311,7 +317,7 @@ class DinamikaApp:
         self.analyze_deform_btn.pack(side=tk.LEFT, padx=3, pady=6)
 
         # Кнопка очистки всех данных
-        ttk.Button(tb, text="🗑 Очистить все", style="Toolbar.TButton",
+        ttk.Button(tb, text="🗑 Очистить все", style="ToolbarClear.TButton",
                    command=self._clear_all_data).pack(side=tk.LEFT, padx=3, pady=6)
 
         self.file_label = ttk.Label(tb, text="Файл не загружен", style="Header.TLabel")
@@ -1306,6 +1312,19 @@ class DinamikaApp:
         # Сброс динамики
         self._reset_dynamics()
         
+        # Дополнительный сброс переменных loader
+        self.loader.result_df = None
+        self.loader.result_channels = None
+        self.loader.magnet_position = None
+        self.loader.magnet_info = ""
+        self.loader.zero_point = None
+        self.loader.auto_zero_point = None
+        self.loader.manual_zero_point = None
+        self.loader.channel_mins = None
+        self.loader.channel_baselines = None
+        self.loader._magnet_intersections = {}
+        self.loader._magnet_x = None
+        
         # Сброс тарировки
         self.loader.calib_channels = None
         self.loader.calib_disp = None
@@ -1343,6 +1362,11 @@ class DinamikaApp:
         self._dynamics_file_path = None
         self._calibration_file_path = None
         self._temp_file_path = None
+        
+        # Сброс переменных анализа деформаций
+        self.deformation_analyzer = None
+        self._deformation_zones = []
+        self._current_deformation_zone = 0
         
         # Перерисовка всех графиков
         self._draw_raw_chart()
