@@ -2110,19 +2110,7 @@ class DinamikaApp:
         peak_frame = ttk.LabelFrame(frame, text=" Пиковые значения и скорость ")
         peak_frame.pack(fill=tk.X, padx=4, pady=4)
         
-        peak_info = []
-        for i in range(self.deformation_analyzer.n_layers):
-            layer_name = self.deformation_analyzer.layer_names[i]
-            peak_val = result['peak_vals'][i]
-            peak_t = result['peak_time'][i]
-            peak_x = result['peak_x'][i]
-            peak_info.append(f"{layer_name}: {peak_val:+.4f} мм @ {peak_t:.1f} мс ({peak_x:.3f} м)")
-        
-        peak_label = ttk.Label(peak_frame, text="  |  ".join(peak_info),
-                               font=("Consolas", 8))
-        peak_label.pack(padx=4, pady=4)
-        
-        # Информация о временах пиков для расчёта скорости
+        # Информация о временах пиков для расчёта скорости (только для самого нижнего слоя)
         if result['first_two_peak_times'][0] is not None:
             t1 = result['first_two_peak_times'][0]
             t2 = result['first_two_peak_times'][1]
@@ -2134,7 +2122,8 @@ class DinamikaApp:
                     axis_distance = 2.5
                 
                 if dt > 0:
-                    speed_info = f"Δt между пиками: {dt:.1f} мс"
+                    calc_speed = axis_distance / (dt / 1000.0) * 3.6  # км/ч
+                    speed_info = f"Δt между пиками: {dt:.1f} мс → V={calc_speed:.1f} км/ч"
                     speed_label = ttk.Label(peak_frame, text=speed_info,
                                            font=("Consolas", 9, "bold"), foreground="#059669")
                     speed_label.pack(padx=4, pady=2)

@@ -296,56 +296,29 @@ class DeformationAnalyzer:
         bottom_layer_idx = self.n_layers - 1
         bottom_layer_def = zone_def[:, bottom_layer_idx]
         
-        # Находим точки резкого изменения графика (большая производная)
-        # Вычисляем абсолютную величину первой производной
-        derivative = np.abs(np.diff(bottom_layer_def))
+        # Находим локальные минимумы (прогибы вниз) - как в предложенном коде
+        peaks = []
+        for i in range(1, len(bottom_layer_def)-1):
+            if bottom_layer_def[i] < bottom_layer_def[i-1] and bottom_layer_def[i] < bottom_layer_def[i+1]:
+                peaks.append((zone_time[i], bottom_layer_def[i]))
         
-        # Находим все локальные максимумы производной (точки резкого изменения)
-        candidates = []
-        for i in range(1, len(derivative) - 1):
-            if derivative[i] >= derivative[i - 1] and derivative[i] >= derivative[i + 1]:
-                # Сохраняем индекс в исходном массиве (i+1, т.к. производная короче на 1)
-                candidates.append((i + 1, derivative[i]))
+        # Фильтруем по амплитуде (берем только сильные прогибы, например < -0.02)
+        strong_peaks = [(t, v) for t, v in peaks if v < -0.02]
         
-        # Также добавляем локальные максимумы самого сигнала с большой амплитудой
-        abs_bottom = np.abs(bottom_layer_def)
-        threshold = np.mean(abs_bottom) + 2 * np.std(abs_bottom)
+        # Если сильных пиков меньше 2, берем все пики и сортируем по амплитуде (наибольшие прогибы)
+        if len(strong_peaks) < 2:
+            # Сортируем все пики по амплитуде (по модулю, наибольшие сначала)
+            peaks_sorted = sorted(peaks, key=lambda x: abs(x[1]), reverse=True)
+            strong_peaks = peaks_sorted[:2]
         
-        for i in range(1, len(abs_bottom) - 1):
-            if abs_bottom[i] >= threshold and abs_bottom[i] >= abs_bottom[i - 1] and abs_bottom[i] >= abs_bottom[i + 1]:
-                # Проверяем, нет ли уже такого кандидата
-                already_exists = any(abs(idx - i) < 10 for idx, _ in candidates)
-                if not already_exists:
-                    candidates.append((i, abs_bottom[i]))
-        
-        # Сортируем кандидатов по величине (убывание)
-        candidates.sort(key=lambda x: x[1], reverse=True)
-        
-        # Берём топ пики (сначала самые большие), затем сортируем их по времени
-        # и берём первые два
-        top_peaks = []
-        distance_points = self.ms_to_points(50.0)  # минимальное расстояние между пиками 50 мс
-        
-        for idx, val in candidates:
-            # Проверяем, что пик достаточно далеко от уже выбранных
-            is_valid = True
-            for existing_idx in top_peaks:
-                if abs(idx - existing_idx) < distance_points:
-                    is_valid = False
-                    break
-            if is_valid:
-                top_peaks.append(idx)
-                if len(top_peaks) >= 2:
-                    break
-        
-        # Сортируем найденные пики по времени и берём первые два
-        top_peaks.sort()
+        # Сортируем выбранные пики по времени
+        strong_peaks.sort(key=lambda x: x[0])
         
         first_two_peak_times = []
-        if len(top_peaks) >= 2:
-            first_two_peak_times = [float(zone_time[top_peaks[0]]), float(zone_time[top_peaks[1]])]
-        elif len(top_peaks) == 1:
-            first_two_peak_times = [float(zone_time[top_peaks[0]]), None]
+        if len(strong_peaks) >= 2:
+            first_two_peak_times = [strong_peaks[0][0], strong_peaks[1][0]]
+        elif len(strong_peaks) == 1:
+            first_two_peak_times = [strong_peaks[0][0], None]
         else:
             first_two_peak_times = [None, None]
 
