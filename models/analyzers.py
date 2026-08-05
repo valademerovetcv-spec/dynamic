@@ -11,6 +11,7 @@ class SignalAnalyzer:
     def find_baseline(values, max_std=0.02, min_fraction=0.05):
         """
         Поиск базовой линии на участке с минимальными колебаниями.
+        Оптимизированная векторизованная версия.
         
         Args:
             values: массив значений сигнала
@@ -32,35 +33,64 @@ class SignalAnalyzer:
         val_span = val_max - val_min
         lower_ceiling = val_min + val_span * 0.35 if val_span > 1e-9 else val_max
         min_len = max(int(n * min_fraction), 10)
-
+        
+        # Ограничиваем поиск только начальным участком (первые 20% данных)
+        # и используем полностью векторизованный подход
+        search_len = min(int(n * 0.2), 5000)
+        if search_len < min_len:
+            search_len = min_len
+        
+        search_arr = arr[:search_len]
+        m = len(search_arr)
+        
+        # Векторизованный расчет скользящего среднего и стандартного отклонения
+        # Используем cumsum для быстрого расчета скользящих статистик
+        cumsum = np.cumsum(np.insert(search_arr, 0, 0))
+        cumsum_sq = np.cumsum(np.insert(search_arr**2, 0, 0))
+        
         best_mean = None
         best_len = 0
         
-        # Оптимизация: используем векторизованные операции там, где возможно
-        step = 1 if n <= 4000 else max(1, n // 4000)
-
-        for start in range(0, n - min_len + 1, step):
-            end = start + min_len
-            seg = arr[start:end]
-            seg_mean = float(np.mean(seg))
-            seg_std = float(np.std(seg))
-            if seg_std > max_std or seg_mean > lower_ceiling:
+        # Проверяем различные длины сегментов
+        for seg_len in range(min_len, min(search_len, 2000), max(1, min_len // 10)):
+            # Векторизованный расчет средних и стандартных отклонений для всех позиций
+            if m < seg_len:
                 continue
-            while end < n:
-                seg = arr[start:end + 1]
-                seg_std = float(np.std(seg))
-                seg_mean = float(np.mean(seg))
-                if seg_std > max_std or seg_mean > lower_ceiling:
-                    break
-                end += 1
-            length = end - start
-            if length > best_len:
-                best_len = length
-                best_mean = float(np.mean(arr[start:end]))
-
+                
+            sums = cumsum[seg_len:] - cumsum[:-seg_len]
+            sums_sq = cumsum_sq[seg_len:] - cumsum_sq[:-seg_len]
+            
+            means = sums / seg_len
+            stds = np.sqrt(sums_sq / seg_len - means**2)
+            
+            # Находим сегменты, удовлетворяющие критериям
+            valid_mask = (stds <= max_std) & (means <= lower_ceiling)
+            valid_indices = np.where(valid_mask)[0]
+            
+            if len(valid_indices) > 0:
+                # Берем первый подходящий сегмент (самый ранний)
+                idx = valid_indices[0]
+                seg_mean = means[idx]
+                
+                # Пытаемся расширить сегмент
+                end_idx = idx + seg_len
+                while end_idx < m:
+                    test_seg = search_arr[idx:end_idx + 1]
+                    test_std = np.std(test_seg)
+                    test_mean = np.mean(test_seg)
+                    if test_std > max_std or test_mean > lower_ceiling:
+                        break
+                    end_idx += 1
+                
+                actual_len = end_idx - idx
+                if actual_len > best_len:
+                    best_len = actual_len
+                    best_mean = float(np.mean(search_arr[idx:end_idx]))
+        
         if best_mean is not None:
             return best_mean
 
+        # Fallback: берем среднее наименьших 10% значений
         low_n = max(int(n * 0.1), 5)
         return float(np.mean(np.sort(arr)[:low_n]))
 
