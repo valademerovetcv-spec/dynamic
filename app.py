@@ -1374,6 +1374,7 @@ class DinamikaApp:
         self.deformation_analyzer = None
         self._deformation_zones = []
         self._current_deformation_zone = 0
+        self._deformation_tabs = {}
         
         # Перерисовка всех графиков
         self._draw_raw_chart()
@@ -1428,6 +1429,13 @@ class DinamikaApp:
             self.deform_axis_distance_var = tk.StringVar(value="2.5")
             self.deform_axis_distance_entry = ttk.Entry(deform_ctrl_frame, textvariable=self.deform_axis_distance_var, width=8)
             self.deform_axis_distance_entry.pack(side=tk.LEFT)
+            # Привязываем обработчик изменения расстояния для обновления скорости
+            self.deform_axis_distance_var.trace_add("write", self._on_axis_distance_changed)
+            
+            # Пересоздаем label статуса
+            self.deform_status_label = ttk.Label(deform_ctrl_frame, text="", style="Info.TLabel")
+            self.deform_status_label.pack(side=tk.LEFT, padx=15)
+            
             self.deformation_notebook.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
         
         # Обновление UI
