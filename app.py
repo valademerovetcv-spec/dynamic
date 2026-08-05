@@ -1,5 +1,6 @@
 import sys
 import os
+import logging
 from datetime import datetime
 import numpy as np
 import tkinter as tk
@@ -14,6 +15,10 @@ import matplotlib.dates as mdates
 from pathlib import Path
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 from calc import DataLoader
 from core.calculator import Calculator
@@ -956,9 +961,39 @@ class DinamikaApp:
                 self.loader.calculate_single_layer(layer_name)
             else:
                 self.calculate()
+            
+            # Обновляем интерфейс после расчёта слоя
+            self.root.after(0, lambda: self._update_ui_after_layer_calc(layer_name))
         except Exception as e:
             messagebox.showerror("Ошибка загрузки", str(e))
             self.status_var.set("Ошибка загрузки")
+    
+    def _update_ui_after_layer_calc(self, layer_name):
+        """Обновление UI после расчёта отдельного слоя."""
+        try:
+            # Обновляем таблицу результатов
+            if self.loader.result_df is not None:
+                self._populate_tree(self.tree_result, self.loader.result_df)
+            
+            # Обновляем графики
+            self._draw_result_chart()
+            self._draw_disp_chart(draw_magnet=False)
+            self._draw_magnet_chart()
+            
+            # Обновляем панель выбора калибровки
+            self._update_calib_selection_panel()
+            
+            # Обновляем информацию о каналах
+            self._update_channel_toggles()
+            
+            # Обновляем статус
+            mn = self.loader.result_df.iloc[:, 1].min() if self.loader.result_df is not None else 0
+            mx = self.loader.result_df.iloc[:, 1].max() if self.loader.result_df is not None else 0
+            mag = self.loader.magnet_info
+            n_ch = len(self.loader.result_channels) if self.loader.result_channels else 1
+            self.stats_var.set(f"Каналов: {n_ch}  |  Результат: {len(self.loader.result_df)} точек  |  {mn} — {mx} мм  |  {mag}")
+        except Exception as e:
+            logger.error(f"Ошибка обновления UI после расчёта слоя: {e}")
 
     def load_dynamics_csv(self):
         path = filedialog.askopenfilename(
@@ -1059,6 +1094,9 @@ class DinamikaApp:
                 self.loader.calculate_single_layer(layer_name)
             else:
                 self.calculate()
+            
+            # Обновляем интерфейс после расчёта слоя
+            self.root.after(0, lambda: self._update_ui_after_layer_calc(layer_name))
         except Exception as e:
             messagebox.showerror("Ошибка загрузки", str(e))
             self.status_var.set("Ошибка загрузки")
@@ -1159,6 +1197,9 @@ class DinamikaApp:
                 self.loader.calculate_single_layer(layer_name)
             else:
                 self.calculate()
+            
+            # Обновляем интерфейс после расчёта слоя
+            self.root.after(0, lambda: self._update_ui_after_layer_calc(layer_name))
         except Exception as e:
             messagebox.showerror("Ошибка загрузки", str(e))
             self.status_var.set("Ошибка загрузки")
