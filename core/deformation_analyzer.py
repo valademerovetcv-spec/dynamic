@@ -296,19 +296,21 @@ class DeformationAnalyzer:
         bottom_layer_idx = self.n_layers - 1
         bottom_layer_def = zone_def[:, bottom_layer_idx]
         
-        # Находим локальные минимумы (прогибы вниз) - как в предложенном коде
+        # Находим локальные минимумы (прогибы вниз) - т.к. данные для отображения переворачиваются (-1),
+        # то на графике они будут выглядеть как пики вверх
         peaks = []
         for i in range(1, len(bottom_layer_def)-1):
             if bottom_layer_def[i] < bottom_layer_def[i-1] and bottom_layer_def[i] < bottom_layer_def[i+1]:
                 peaks.append((zone_time[i], bottom_layer_def[i]))
         
         # Сортируем пики по амплитуде (по модулю, наибольшие прогибы сначала)
+        # Т.к. значения отрицательные (прогибы вниз), берём по абсолютному значению
         peaks_sorted = sorted(peaks, key=lambda x: abs(x[1]), reverse=True)
         
-        # Берем два наибольших пика
+        # Берем два наибольших пика (с максимальной амплитудой)
         selected_peaks = peaks_sorted[:2]
         
-        # Сортируем выбранные пики по времени
+        # Сортируем выбранные пики по времени (первый пик должен быть раньше второго)
         selected_peaks.sort(key=lambda x: x[0])
         
         first_two_peak_times = []
