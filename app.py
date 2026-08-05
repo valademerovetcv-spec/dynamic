@@ -1227,6 +1227,7 @@ class DinamikaApp:
         self.loader.source_data = None
         self.loader.result_df = None
         self.loader.result_channels = None
+        self.loader.result_channels_raw = None
         self.loader.magnet_position = None
         self.loader.magnet_info = ""
         self.loader.calib_branches = None
@@ -1927,9 +1928,8 @@ class DinamikaApp:
             self.result_ax.text(0.5, 0.5, "Нет данных",
                                 ha="center", va="center", transform=self.result_ax.transAxes,
                                 fontsize=12, color="#94a3b8")
-
+        
         self.result_ax.grid(True, alpha=0.2)
-
         self.result_fig.tight_layout()
         self.result_canvas.draw()
 
