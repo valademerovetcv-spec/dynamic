@@ -291,15 +291,17 @@ class DeformationAnalyzer:
         peak_time = zone_time[peak_idx]
         peak_vals = zone_def[peak_idx, np.arange(self.n_layers)]
 
-        # Поиск двух самых больших пиков для расчёта скорости по расстоянию между осями
-        abs_def = np.abs(zone_def)
+        # Поиск двух пиков на самом нижнем слое для расчёта скорости по расстоянию между осями
+        # Берём самый нижний слой (последний в массиве данных)
+        bottom_layer_idx = self.n_layers - 1
+        bottom_layer_def = zone_def[:, bottom_layer_idx]
         
-        # Находим все локальные максимумы на summed score (сумма по всем слоям)
-        score = np.sum(abs_def, axis=1)
+        # Находим все локальные максимумы на абсолютном значении деформации нижнего слоя
+        abs_bottom = np.abs(bottom_layer_def)
         candidates = []
-        for i in range(1, len(score) - 1):
-            if score[i] >= score[i - 1] and score[i] >= score[i + 1]:
-                candidates.append((i, score[i]))
+        for i in range(1, len(abs_bottom) - 1):
+            if abs_bottom[i] >= abs_bottom[i - 1] and abs_bottom[i] >= abs_bottom[i + 1]:
+                candidates.append((i, abs_bottom[i]))
         
         # Сортируем кандидаты по величине пика (убывание)
         candidates.sort(key=lambda x: x[1], reverse=True)

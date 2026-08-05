@@ -2134,8 +2134,7 @@ class DinamikaApp:
                     axis_distance = 2.5
                 
                 if dt > 0:
-                    calc_speed = axis_distance / (dt / 1000.0) * 3.6  # км/ч
-                    speed_info = f"Δt между пиками: {dt:.1f} мс → V={calc_speed:.1f} км/ч (расстояние между осями: {axis_distance} м)"
+                    speed_info = f"Δt между пиками: {dt:.1f} мс"
                     speed_label = ttk.Label(peak_frame, text=speed_info,
                                            font=("Consolas", 9, "bold"), foreground="#059669")
                     speed_label.pack(padx=4, pady=2)
@@ -2323,7 +2322,7 @@ class DinamikaApp:
             dt = t2 - t1  # мс
             if dt > 0:
                 calc_speed = axis_distance / (dt / 1000.0) * 3.6  # км/ч
-                speed_info = f"Δt между пиками: {dt:.1f} мс → V={calc_speed:.1f} км/ч (расстояние между осями: {axis_distance} м)"
+                speed_info = f"Δt между пиками: {dt:.1f} мс"
                 
                 speed_label = tab_data.get("speed_label")
                 if speed_label:
