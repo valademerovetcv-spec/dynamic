@@ -296,41 +296,69 @@ class DeformationAnalyzer:
         bottom_layer_idx = self.n_layers - 1
         bottom_layer_def = zone_def[:, bottom_layer_idx]
         
-        # Ищем локальные МАКСИМУМЫ на нижнем слое
-        # Данные уже центрированы: прогиб вниз = ПОЛОЖИТЕЛЬНЫЕ значения (т.к. вычитаем baseline из больших значений)
-        # НЕ инвертируем знак, работаем с оригинальными данными до переворота для графика
-        peak_indices = []
-        for i in range(1, len(bottom_layer_def)-1):
-            # Ищем локальные максимумы (больше соседей)
-            if bottom_layer_def[i] > bottom_layer_def[i-1] and bottom_layer_def[i] > bottom_layer_def[i+1]:
-                # Фильтруем по минимальной амплитуде прогиба (отсекаем шум)
-                # Прогиб должен быть больше чем 0.01 мм (порог снижен для обнаружения первого пика)
-                if bottom_layer_def[i] > 0.01:  # порог 0.01 мм
-                    peak_indices.append(i)
+        # Алгоритм поиска двух последовательных под-участков с крупными амплитудами:
+        # 1. Найти старт и окончание крупной амплитуды (порог 30% от максимума)
+        # 2. Внутри каждого под-участка найти наибольшее значение отклонения
+        # 3. Если несколько максимумов подряд, взять последнее по времени
+        # 4. Найти два таких под-участка, использовать их пики для расчёта
         
-        # Если пиков меньше 2, не можем рассчитать скорость
-        if len(peak_indices) < 2:
+        max_val = np.max(bottom_layer_def)
+        threshold = max_val * 0.3  # порог 30% от максимума
+        
+        # Находим все точки где сигнал превышает порог
+        above_threshold = np.where(bottom_layer_def > threshold)[0]
+        
+        if len(above_threshold) == 0:
             first_two_peak_times = [None, None]
         else:
-            # Сортируем пики по времени (по индексу)
-            peak_indices_sorted = sorted(peak_indices)
+            # Группируем соседние точки в под-участки (разрыв > 50 мс = новый участок)
+            gap_points = self.ms_to_points(50.0)
+            sub_zones = []
+            start = above_threshold[0]
+            prev = above_threshold[0]
             
-            # Фильтруем пики с минимальным зазором 100 мс (чтобы отбросить близкие локальные экстремумы)
-            min_gap_points = self.ms_to_points(100.0)
-            filtered_peaks = []
-            for idx in peak_indices_sorted:
-                if not filtered_peaks or (idx - filtered_peaks[-1]) >= min_gap_points:
-                    filtered_peaks.append(idx)
+            for idx in above_threshold[1:]:
+                if idx - prev > gap_points:
+                    # Новый под-участок
+                    sub_zones.append((start, prev))
+                    start = idx
+                prev = idx
+            sub_zones.append((start, prev))
             
-            # Если после фильтрации осталось меньше 2 пиков, берем первые два из отсортированных
-            if len(filtered_peaks) < 2:
-                first_peak_idx = peak_indices_sorted[0]
-                second_peak_idx = peak_indices_sorted[1]
+            # Для каждого под-участка находим пик (максимум, при нескольких - последний по времени)
+            sub_zone_peaks = []
+            for s, e in sub_zones:
+                # Находим максимальное значение в под-участке
+                max_val_zone = np.max(bottom_layer_def[s:e+1])
+                # Находим все индексы где значение равно максимуму
+                max_indices = np.where(bottom_layer_def[s:e+1] == max_val_zone)[0]
+                # Берём последний по времени (последний индекс)
+                peak_local_idx = max_indices[-1]
+                peak_global_idx = s + peak_local_idx
+                sub_zone_peaks.append(peak_global_idx)
+            
+            # Если нашли хотя бы 2 под-участка, берём первые два
+            if len(sub_zone_peaks) >= 2:
+                first_peak_idx = sub_zone_peaks[0]
+                second_peak_idx = sub_zone_peaks[1]
+                first_two_peak_times = [zone_time[first_peak_idx], zone_time[second_peak_idx]]
+            elif len(sub_zone_peaks) == 1:
+                # Только один под-участок - ищем второй пик как локальный максимум внутри него
+                s, e = sub_zones[0]
+                peak_indices = []
+                for i in range(s+1, e):
+                    if bottom_layer_def[i] > bottom_layer_def[i-1] and bottom_layer_def[i] > bottom_layer_def[i+1]:
+                        if bottom_layer_def[i] > threshold * 0.5:
+                            peak_indices.append(i)
+                
+                if len(peak_indices) >= 2:
+                    first_peak_idx = peak_indices[0]
+                    second_peak_idx = peak_indices[-1]
+                    first_two_peak_times = [zone_time[first_peak_idx], zone_time[second_peak_idx]]
+                else:
+                    first_two_peak_times = [zone_time[sub_zone_peaks[0]], None]
             else:
-                first_peak_idx = filtered_peaks[0]
-                second_peak_idx = filtered_peaks[1]
-            
-            first_two_peak_times = [zone_time[first_peak_idx], zone_time[second_peak_idx]]
+                first_two_peak_times = [None, None]
 
         # Самый большой пик среди всех слоёв
         flat_idx = int(np.nanargmax(np.abs(zone_def)))
