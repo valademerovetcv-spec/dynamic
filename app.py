@@ -510,6 +510,13 @@ class DinamikaApp:
         self.deform_threshold_entry = ttk.Entry(deform_ctrl_frame, textvariable=self.deform_threshold_var, width=8)
         self.deform_threshold_entry.pack(side=tk.LEFT)
         
+        ttk.Label(deform_ctrl_frame, text="Расстояние между осями, м:").pack(side=tk.LEFT, padx=(15, 5))
+        self.deform_axis_distance_var = tk.StringVar(value="2.5")
+        self.deform_axis_distance_entry = ttk.Entry(deform_ctrl_frame, textvariable=self.deform_axis_distance_var, width=8)
+        self.deform_axis_distance_entry.pack(side=tk.LEFT)
+        # Привязываем обработчик изменения расстояния для обновления скорости
+        self.deform_axis_distance_var.trace_add("write", self._on_axis_distance_changed)
+        
         self.deform_status_label = ttk.Label(deform_ctrl_frame, text="", style="Info.TLabel")
         self.deform_status_label.pack(side=tk.LEFT, padx=15)
         
@@ -2099,35 +2106,55 @@ class DinamikaApp:
             "layers": layer_labels
         }
         
-        # Панель с пиками (скрыта по запросу)
-        # peak_frame = ttk.LabelFrame(frame, text=" Пиковые значения ")
-        # peak_frame.pack(fill=tk.X, padx=4, pady=4)
-        # 
-        # peak_info = []
-        # for i in range(self.deformation_analyzer.n_layers):
-        #     layer_name = self.deformation_analyzer.layer_names[i]
-        #     peak_val = result['peak_vals'][i]
-        #     peak_t = result['peak_time'][i]
-        #     peak_x = result['peak_x'][i]
-        #     peak_info.append(f"{layer_name}: {peak_val:+.4f} мм @ {peak_t:.1f} мс ({peak_x:.3f} м)")
-        # 
-        # peak_label = ttk.Label(peak_frame, text="  |  ".join(peak_info),
-        #                        font=("Consolas", 8))
-        # peak_label.pack(padx=4, pady=4)
-        # 
-        # # Информация о временах пиков для расчёта скорости
-        # if result['first_two_peak_times'][0] is not None:
-        #     t1 = result['first_two_peak_times'][0]
-        #     t2 = result['first_two_peak_times'][1]
-        #     if t2 is not None:
-        #         axis_distance = 0.5  # м (можно вынести в настройки)
-        #         dt = t2 - t1  # мс
-        #         if dt > 0:
-        #             calc_speed = axis_distance / (dt / 1000.0) * 3.6  # км/ч
-        #             speed_info = f"Δt между пиками: {dt:.1f} мс → V={calc_speed:.1f} км/ч"
-        #             speed_label = ttk.Label(peak_frame, text=speed_info,
-        #                                    font=("Consolas", 8), foreground="#059669")
-        #             speed_label.pack(padx=4, pady=2)
+        # Панель с пиковыми значениями и расчётом скорости
+        peak_frame = ttk.LabelFrame(frame, text=" Пиковые значения и скорость ")
+        peak_frame.pack(fill=tk.X, padx=4, pady=4)
+        
+        peak_info = []
+        for i in range(self.deformation_analyzer.n_layers):
+            layer_name = self.deformation_analyzer.layer_names[i]
+            peak_val = result['peak_vals'][i]
+            peak_t = result['peak_time'][i]
+            peak_x = result['peak_x'][i]
+            peak_info.append(f"{layer_name}: {peak_val:+.4f} мм @ {peak_t:.1f} мс ({peak_x:.3f} м)")
+        
+        peak_label = ttk.Label(peak_frame, text="  |  ".join(peak_info),
+                               font=("Consolas", 8))
+        peak_label.pack(padx=4, pady=4)
+        
+        # Информация о временах пиков для расчёта скорости
+        if result['first_two_peak_times'][0] is not None:
+            t1 = result['first_two_peak_times'][0]
+            t2 = result['first_two_peak_times'][1]
+            if t2 is not None:
+                dt = t2 - t1  # мс
+                try:
+                    axis_distance = float(self.deform_axis_distance_var.get())
+                except ValueError:
+                    axis_distance = 2.5
+                
+                if dt > 0:
+                    calc_speed = axis_distance / (dt / 1000.0) * 3.6  # км/ч
+                    speed_info = f"Δt между пиками: {dt:.1f} мс → V={calc_speed:.1f} км/ч (расстояние между осями: {axis_distance} м)"
+                    speed_label = ttk.Label(peak_frame, text=speed_info,
+                                           font=("Consolas", 9, "bold"), foreground="#059669")
+                    speed_label.pack(padx=4, pady=2)
+                    
+                    # Сохраняем ссылку на label для обновления при изменении расстояния
+                    tab_data["speed_label"] = speed_label
+                    tab_data["speed_info_base"] = (t1, t2, axis_distance)
+                else:
+                    speed_label = ttk.Label(peak_frame, text=f"Δt между пиками: {dt:.1f} мс (некорректное значение)",
+                                           font=("Consolas", 8), foreground="#dc2626")
+                    speed_label.pack(padx=4, pady=2)
+            else:
+                speed_label = ttk.Label(peak_frame, text="Второй пик не найден",
+                                       font=("Consolas", 8), foreground="#6b7280")
+                speed_label.pack(padx=4, pady=2)
+        else:
+            speed_label = ttk.Label(peak_frame, text="Пики не найдены для расчёта скорости",
+                                   font=("Consolas", 8), foreground="#6b7280")
+            speed_label.pack(padx=4, pady=2)
 
     def _on_deformation_tab_changed(self, event):
         """Обработчик переключения вкладок участков деформации."""
@@ -2267,6 +2294,40 @@ class DinamikaApp:
                     delta_texts.append(f"{layer1}→{layer2}: {delta:+.4f} мм")
             if delta_texts:
                 cursor_delta_lbl.config(text="\n".join(delta_texts))
+
+    def _on_axis_distance_changed(self, *args):
+        """Обработчик изменения расстояния между осями - обновляет расчёт скорости."""
+        try:
+            axis_distance = float(self.deform_axis_distance_var.get())
+        except ValueError:
+            return
+        
+        # Обновляем скорость на всех вкладках
+        for tab_name, data in self._deformation_tabs.items():
+            if not isinstance(data, tuple) or len(data) <= 3:
+                continue
+            
+            tab_data = data[3]
+            result = data[1]
+            
+            # Проверяем наличие данных о пиках
+            if result['first_two_peak_times'][0] is None:
+                continue
+            
+            t1 = result['first_two_peak_times'][0]
+            t2 = result['first_two_peak_times'][1]
+            
+            if t2 is None:
+                continue
+            
+            dt = t2 - t1  # мс
+            if dt > 0:
+                calc_speed = axis_distance / (dt / 1000.0) * 3.6  # км/ч
+                speed_info = f"Δt между пиками: {dt:.1f} мс → V={calc_speed:.1f} км/ч (расстояние между осями: {axis_distance} м)"
+                
+                speed_label = tab_data.get("speed_label")
+                if speed_label:
+                    speed_label.config(text=speed_info)
 
     # === Peak selection methods ===
 
