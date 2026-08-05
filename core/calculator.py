@@ -724,29 +724,29 @@ class Calculator:
         dn, result_disp, calib_info = self._calc_layer_worker((layer_name, tugriki_vals, cal, auto_range, manual))
         
         # Обновляем только информацию для этого слоя
-        if not hasattr(self.loader, '_per_layer_calib_info'):
+        if not hasattr(self.loader, '_per_layer_calib_info') or self.loader._per_layer_calib_info is None:
             self.loader._per_layer_calib_info = {}
         self.loader._per_layer_calib_info[layer_name] = calib_info
         
         # Сохраняем сырые результаты
-        if not hasattr(self.loader, 'result_channels_raw'):
+        if not hasattr(self.loader, 'result_channels_raw') or self.loader.result_channels_raw is None:
             self.loader.result_channels_raw = {}
         self.loader.result_channels_raw[layer_name] = result_disp
         
         # Находим baseline для этого слоя
         layer_baseline = SignalAnalyzer.find_baseline(result_disp)
         
-        if not hasattr(self.loader, 'channel_baselines'):
+        if not hasattr(self.loader, 'channel_baselines') or self.loader.channel_baselines is None:
             self.loader.channel_baselines = {}
         self.loader.channel_baselines[layer_name] = layer_baseline
         
-        if not hasattr(self.loader, 'channel_mins'):
+        if not hasattr(self.loader, 'channel_mins') or self.loader.channel_mins is None:
             self.loader.channel_mins = {}
         self.loader.channel_mins[layer_name] = layer_baseline
         
         # Центрированный результат для графика "Пиковые значения"
         centered_result = result_disp - layer_baseline
-        if not hasattr(self.loader, 'result_channels'):
+        if not hasattr(self.loader, 'result_channels') or self.loader.result_channels is None:
             self.loader.result_channels = {}
         self.loader.result_channels[layer_name] = centered_result
         
