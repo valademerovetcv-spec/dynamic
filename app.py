@@ -2141,7 +2141,7 @@ class DinamikaApp:
                     
                     # Сохраняем ссылку на label для обновления при изменении расстояния
                     tab_data["speed_label"] = speed_label
-                    tab_data["speed_info_base"] = (t1, t2, axis_distance)
+                    tab_data["speed_info_base"] = (t1, t2)
                 else:
                     speed_label = ttk.Label(peak_frame, text=f"Δt между пиками: {dt:.1f} мс (некорректное значение)",
                                            font=("Consolas", 8), foreground="#dc2626")
@@ -2322,7 +2322,7 @@ class DinamikaApp:
             dt = t2 - t1  # мс
             if dt > 0:
                 calc_speed = axis_distance / (dt / 1000.0) * 3.6  # км/ч
-                speed_info = f"Δt между пиками: {dt:.1f} мс"
+                speed_info = f"Δt между пиками: {dt:.1f} мс → V={calc_speed:.1f} км/ч"
                 
                 speed_label = tab_data.get("speed_label")
                 if speed_label:
