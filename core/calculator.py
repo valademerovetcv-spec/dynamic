@@ -49,21 +49,44 @@ class Calculator:
         return min_idx, peak_idx
 
     def _find_rising_range(self, disp, tug):
-        """Восходящий участок тарировки: от минимума до пика."""
-        disp = np.asarray(disp, dtype=float)
+        """Поиск основного возрастающего участка на калибровочной кривой."""
         tug = np.asarray(tug, dtype=float)
-        if len(disp) == 0 or len(tug) == 0:
-            return 0.0, 0.0
-        # Векторизованный поиск индексов
-        peak_idx = int(np.argmax(tug))
-        if peak_idx == 0:
-            return 0.0, 0.0
-        min_idx = int(np.argmin(tug[:peak_idx]))
-        left = float(disp[min_idx])
-        right = float(disp[peak_idx])
-        if left > right:
-            left, right = right, left
-        return left, right
+        d = np.asarray(disp, dtype=float)
+        n = min(len(tug), len(d))
+        if n < 3:
+            return (float(np.min(d)), float(np.max(d)))
+        
+        # Находим все участки монотонного возрастания сигнала датчика
+        diff = np.diff(tug[:n])
+        
+        # Ищем непрерывные участки где diff > 0
+        rising_segments = []
+        start_idx = None
+        
+        for i in range(len(diff)):
+            if diff[i] > 0:
+                if start_idx is None:
+                    start_idx = i
+            else:
+                if start_idx is not None:
+                    # Завершаем текущий участок
+                    rising_segments.append((start_idx, i))
+                    start_idx = None
+        
+        # Если последний участок продолжается до конца
+        if start_idx is not None:
+            rising_segments.append((start_idx, len(diff)))
+        
+        # Если не нашли ни одного участка возрастания, возвращаем полный диапазон
+        if not rising_segments:
+            return (float(np.min(d)), float(np.max(d)))
+        
+        # Выбираем самый длинный участок возрастания
+        longest_segment = max(rising_segments, key=lambda x: x[1] - x[0])
+        rising_start, rising_end = longest_segment
+        
+        # Возвращаем диапазон перемещений соответствующий основному участку возрастания
+        return (float(d[rising_start]), float(d[rising_end]))
 
     def _merge_rising_ranges(self, ranges):
         """Пересечение восходящих диапазонов всех датчиков."""
