@@ -1919,6 +1919,21 @@ class DinamikaApp:
             self._deformation_tabs["Нет данных"] = default_frame
             return
         
+        # Создаем первую вкладку с полным графиком всех данных
+        full_chart_frame = ttk.Frame(self.deformation_notebook)
+        self.deformation_notebook.add(full_chart_frame, text="  Весь график  ")
+        
+        # Построение полного графика
+        try:
+            self._populate_full_deformation_chart(full_chart_frame, speed_kmh)
+        except Exception as e:
+            print(f"[ERROR] Ошибка при построении полного графика: {e}")
+            import traceback
+            traceback.print_exc()
+            lbl = ttk.Label(full_chart_frame, text=f"Ошибка построения графика:\n{e}",
+                           foreground="red")
+            lbl.pack(expand=True)
+        
         # Создаем вкладки для каждого участка
         print(f"[DEBUG] Создание {len(self._deformation_zones)} вкладок")
         for i, zone_idx in enumerate(range(len(self._deformation_zones))):
@@ -1950,6 +1965,104 @@ class DinamikaApp:
                 self._current_deformation_zone = 0
             except Exception as e:
                 print(f"[ERROR] Ошибка при получении первого результата: {e}")
+
+    def _populate_full_deformation_chart(self, parent, speed_kmh):
+        """Построение полного графика деформаций по всем данным."""
+        # Верхняя панель с информацией
+        info_frame = ttk.Frame(parent)
+        info_frame.pack(fill=tk.X, padx=4, pady=4)
+        
+        info_label = ttk.Label(info_frame, 
+                               text="Полный график деформаций по всем данным",
+                               font=("Segoe UI", 10, "bold"),
+                               foreground="#2563eb")
+        info_label.pack(side=tk.LEFT, padx=4)
+        
+        # График - занимает основное пространство
+        chart_frame = ttk.Frame(parent)
+        chart_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        
+        fig = Figure(figsize=(10, 6), dpi=100)
+        ax = fig.add_subplot(111)
+        
+        # Используем все данные из анализатора
+        time_ms = self.deformation_analyzer.time
+        data = self.deformation_analyzer.data
+        layer_names = self.deformation_analyzer.layer_names
+        
+        # Вычисляем скорость для перевода времени в расстояние
+        try:
+            speed_ms = speed_kmh / 3.6
+        except (ValueError, TypeError):
+            speed_ms = SPEED_KMH_DEFAULT / 3.6
+        
+        # Переводим время в расстояние (метры)
+        x = (time_ms - time_ms[0]) / 1000.0 * speed_ms
+        
+        # Центрируем данные относительно глобального базового уровня
+        if self.deformation_analyzer.global_baseline is None:
+            self.deformation_analyzer.prepare()
+        
+        base = self.deformation_analyzer.global_baseline
+        defs_centered = data - base
+        
+        # Построение графиков для каждого слоя (переворачиваем знак для правильной ориентации)
+        for i in range(self.deformation_analyzer.n_layers):
+            layer_name = layer_names[i]
+            color = CHANNEL_COLORS[i % len(CHANNEL_COLORS)]
+            ax.plot(x, -defs_centered[:, i], linewidth=1.2, color=color, label=layer_name, alpha=0.8)
+        
+        ax.set_xlabel("Путь, м")
+        ax.set_ylabel("Деформация, мм")
+        ax.set_title("Деформации по слоям (полный график)")
+        ax.legend(loc="upper right", fontsize=8)
+        ax.grid(True, alpha=0.3)
+        
+        # Добавляем вертикальные линии для найденных участков деформаций
+        for zone_idx, (s, e) in enumerate(self.deformation_analyzer.zones):
+            zone_x_start = x[s]
+            zone_x_end = x[e]
+            ax.axvspan(zone_x_start, zone_x_end, alpha=0.15, color='red', 
+                      label=f'Участок {zone_idx + 1}' if zone_idx == 0 else "")
+        
+        fig.tight_layout()
+        
+        canvas = FigureCanvasTkAgg(fig, master=chart_frame)
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # Toolbar для графика
+        toolbar = NavigationToolbar2Tk(canvas, chart_frame)
+        toolbar.update()
+        toolbar.pack_forget()  # Скрываем тулбар по умолчанию
+        
+        # Подключаем обработчики событий для интерактивности
+        canvas.mpl_connect("motion_notify_event", self._on_full_chart_motion)
+        
+        # Панель со статистикой под графиком
+        stats_frame = ttk.LabelFrame(parent, text=" Статистика по полному графику ")
+        stats_frame.pack(fill=tk.X, padx=4, pady=4)
+        
+        # Находим максимальные значения по каждому слою
+        max_values = np.max(np.abs(defs_centered), axis=0)
+        max_indices = np.argmax(np.abs(defs_centered), axis=0)
+        
+        stats_text = ""
+        for i in range(self.deformation_analyzer.n_layers):
+            layer_name = layer_names[i]
+            max_val = max_values[i]
+            max_x = x[max_indices[i]]
+            stats_text += f"{layer_name}: макс. {max_val:.4f} мм на пути {max_x:.2f} м\n"
+        
+        stats_text += f"\nВсего найдено участков деформаций: {len(self.deformation_analyzer.zones)}"
+        
+        stats_label = ttk.Label(stats_frame, text=stats_text,
+                               font=("Consolas", 9), justify=tk.LEFT)
+        stats_label.pack(padx=4, pady=4)
+
+    def _on_full_chart_motion(self, event):
+        """Обработка движения мыши над полным графиком."""
+        # Можно добавить отображение значений под курсором
+        pass
 
     def _populate_deformation_tab(self, frame, result, zone_idx, speed_kmh):
         """Заполнение вкладки данными об участке."""
