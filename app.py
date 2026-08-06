@@ -3337,7 +3337,7 @@ class DinamikaApp:
             ws_dyn.title = "Динамика"
             
             logger.info(f"Лист 'Динамика': dynamics_channels={self.loader.dynamics_channels.keys() if self.loader.dynamics_channels else None}")
-            logger.info(f"Лист 'Динамика': dynamics_time length={len(self.loader.dynamics_time) if self.loader.dynamics_time else 0}")
+            logger.info(f"Лист 'Динамика': dynamics_time length={len(self.loader.dynamics_time) if self.loader.dynamics_time is not None and len(self.loader.dynamics_time) > 0 else 0}")
             
             # Заголовки
             ws_dyn.cell(row=1, column=1, value="Время, мсек")
