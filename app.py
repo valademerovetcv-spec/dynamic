@@ -3351,7 +3351,7 @@ class DinamikaApp:
             
             # --- Секция Тарировка по слоям ---
             calib_start_col = dyn_col
-            ws_raw.cell(row=1, column=calib_start_col, value="Тарировка по слоям")
+            ws_raw.cell(row=1, column=calib_start_col, value="Тарировка")
             
             if self.loader.per_layer_calib:
                 # Для каждого слоя создаём свою секцию
@@ -3363,15 +3363,20 @@ class DinamikaApp:
                     # Перемещение - заголовок в строке 2, данные с строки 3
                     disp_col = layer_col
                     ws_raw.cell(row=2, column=disp_col, value="Перемещение, мм")
-                    for i, val in enumerate(calib_data["disp"]):
-                        ws_raw.cell(row=i + 3, column=disp_col, value=val)
+                    disp_vals = calib_data["disp"]
+                    n_disp = len(disp_vals) if disp_vals is not None else 0
+                    for i in range(n_disp):
+                        ws_raw.cell(row=i + 3, column=disp_col, value=float(disp_vals[i]))
                     
                     # Датчики Холла для этого слоя - заголовки в строке 2, данные с строки 3
                     sensor_col = layer_col + 1
                     for sensor_name, sensor_data in calib_data["tug"].items():
                         ws_raw.cell(row=2, column=sensor_col, value=sensor_name)
-                        for i, val in enumerate(sensor_data):
-                            ws_raw.cell(row=i + 3, column=sensor_col, value=val)
+                        # Убеждаемся что длина данных датчика совпадает с длиной перемещения
+                        n_sensor = len(sensor_data) if sensor_data is not None else 0
+                        n = min(n_sensor, n_disp)
+                        for i in range(n):
+                            ws_raw.cell(row=i + 3, column=sensor_col, value=float(sensor_data[i]))
                         sensor_col += 1
                     
                     # Следующий слой начинается после всех датчиков текущего
