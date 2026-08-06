@@ -161,7 +161,11 @@ class ExcelLoader:
                 
                 while sensor_col_idx < max_col:
                     sensor_name = row2[sensor_col_idx] if sensor_col_idx < len(row2) else None
-                    if not sensor_name or "Слой:" in str(sensor_name):
+                    # Пропускаем пустые ячейки в заголовке, ищем следующую колонку с именем датчика
+                    if not sensor_name:
+                        sensor_col_idx += 1
+                        continue
+                    if "Слой:" in str(sensor_name):
                         break
                     
                     sensor_vals = []
@@ -194,14 +198,15 @@ class ExcelLoader:
         
         # Вычисляем автоматические диапазоны для каждого слоя
         self._per_layer_auto_range = {}
+        temp_xlsx_loader = XLSXLoader()
         for layer_name, calib_data in self.per_layer_calib.items():
-            auto_left, auto_right = self._find_layer_overlap_static(
+            auto_left, auto_right = temp_xlsx_loader._find_layer_overlap_static(
                 calib_data["disp"], calib_data["tug"]
             )
             self._per_layer_auto_range[layer_name] = (auto_left, auto_right)
         
         # Загружаем результаты если есть лист "Результат расчета"
-        if sheet_names and "Результат расчета" in sheet_names:
+        if sheet_names is not None and "Результат расчета" in sheet_names:
             result_ws = openpyxl.load_workbook(path, data_only=True, read_only=True)
             result_sheet = result_ws["Результат расчета"]
             result_data = list(result_sheet.iter_rows(values_only=True))
