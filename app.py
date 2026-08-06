@@ -3346,7 +3346,7 @@ class DinamikaApp:
                     ws_dyn.cell(row=1, column=col_idx, value=ch_name)
             
             # Данные
-            if self.loader.dynamics_time:
+            if self.loader.dynamics_time is not None and len(self.loader.dynamics_time) > 0:
                 n_rows = len(self.loader.dynamics_time)
                 for i in range(n_rows):
                     ws_dyn.cell(row=i + 2, column=1, value=self.loader.dynamics_time[i])
@@ -3406,8 +3406,8 @@ class DinamikaApp:
                         for i in range(n):
                             ws_calib.cell(row=row_idx, column=1, value=f"Слой: {layer_name}")
                             ws_calib.cell(row=row_idx, column=2, value=sensor_name)
-                            ws_calib.cell(row=row_idx, column=3, float(disp_vals[i]))
-                            ws_calib.cell(row=row_idx, column=4, float(sensor_data[i]))
+                            ws_calib.cell(row=row_idx, column=3, value=float(disp_vals[i]))
+                            ws_calib.cell(row=row_idx, column=4, value=float(sensor_data[i]))
                             row_idx += 1
             
             # Автоширина колонок
