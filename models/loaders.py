@@ -68,9 +68,9 @@ class ExcelLoader:
         dyn_section = 0
         calib_section = None
         
-        # Ищем начало секции тарировки по слоям
+        # Ищем начало секции тарировки по слоям - ищем "Тарировка" или первый "Слой:"
         for c, name in enumerate(row1):
-            if name and "Тарировка" in str(name):
+            if name and ("Тарировка" in str(name) or "Слой:" in str(name)):
                 calib_section = c
                 break
         
@@ -136,12 +136,12 @@ class ExcelLoader:
         col_idx = calib_section
         
         while col_idx < max_col:
-            # Проверяем заголовок слоя
-            layer_header = row2[col_idx] if col_idx < len(row2) else None
+            # Проверяем заголовок слоя в ПЕРВОЙ строке (row1)
+            layer_header = row1[col_idx] if col_idx < len(row1) else None
             if layer_header and "Слой:" in str(layer_header):
                 layer_name = str(layer_header).replace("Слой:", "").strip()
                 
-                # Перемещение в той же колонке что и заголовок
+                # Перемещение в той же колонке что и заголовок - заголовок во ВТОРОЙ строке (row2)
                 disp_col_idx = col_idx
                 disp_vals = []
                 for row in raw_data:
@@ -155,7 +155,7 @@ class ExcelLoader:
                 disp_mask = ~np.isnan(disp_vals)
                 disp_vals = disp_vals[disp_mask]
                 
-                # Датчики Холла в следующих колонках
+                # Датчики Холла в следующих колонках - заголовки во ВТОРОЙ строке (row2)
                 sensor_col_idx = col_idx + 1
                 tug_cols = {}
                 
@@ -166,6 +166,9 @@ class ExcelLoader:
                         sensor_col_idx += 1
                         continue
                     if "Слой:" in str(sensor_name):
+                        break
+                    # Проверяем, не является ли это заголовком "Перемещение, мм" следующего слоя
+                    if "Перемещение" in str(sensor_name) and sensor_col_idx > col_idx + 1:
                         break
                     
                     sensor_vals = []

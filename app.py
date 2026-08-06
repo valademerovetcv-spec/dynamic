@@ -3357,25 +3357,26 @@ class DinamikaApp:
                 # Для каждого слоя создаём свою секцию
                 layer_col = calib_start_col
                 for layer_name, calib_data in self.loader.per_layer_calib.items():
-                    # Заголовок слоя
-                    ws_raw.cell(row=2, column=layer_col, value=f"Слой: {layer_name}")
+                    # Заголовок слоя в строке 1
+                    ws_raw.cell(row=1, column=layer_col, value=f"Слой: {layer_name}")
                     
-                    # Перемещение
+                    # Перемещение - заголовок в строке 2, данные с строки 3
                     disp_col = layer_col
-                    ws_raw.cell(row=3, column=disp_col, value="Перемещение, мм")
+                    ws_raw.cell(row=2, column=disp_col, value="Перемещение, мм")
                     for i, val in enumerate(calib_data["disp"]):
-                        ws_raw.cell(row=i + 4, column=disp_col, value=val)
+                        ws_raw.cell(row=i + 3, column=disp_col, value=val)
                     
-                    # Датчики Холла для этого слоя - заголовки в строке 2, данные с строки 4
+                    # Датчики Холла для этого слоя - заголовки в строке 2, данные с строки 3
                     sensor_col = layer_col + 1
                     for sensor_name, sensor_data in calib_data["tug"].items():
                         ws_raw.cell(row=2, column=sensor_col, value=sensor_name)
                         for i, val in enumerate(sensor_data):
-                            ws_raw.cell(row=i + 4, column=sensor_col, value=val)
+                            ws_raw.cell(row=i + 3, column=sensor_col, value=val)
                         sensor_col += 1
                     
                     # Следующий слой начинается после всех датчиков текущего
-                    layer_col = sensor_col
+                    # Добавляем пустую колонку между слоями для визуального разделения
+                    layer_col = sensor_col + 1
             
             # Автоширина колонок
             ws_raw.column_dimensions["A"].width = 15
