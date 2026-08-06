@@ -32,7 +32,7 @@ class ExcelLoader:
             wb.close()
             
             if len(all_data) >= 2 and all_data[0][0] == "Динамика":
-                return self._load_new_format_excel(all_data, path)
+                return self._load_new_format_excel(all_data, path, sheet_names)
             elif len(all_data) >= 2 and all_data[0][0] == "Результат расчета":
                 return self._load_result_format_excel(all_data, path)
         
@@ -40,7 +40,7 @@ class ExcelLoader:
         wb.close()
         return self._load_old_format_excel(path)
     
-    def _load_new_format_excel(self, all_data, path):
+    def _load_new_format_excel(self, all_data, path, sheet_names=None):
         """Загрузка нового формата с листом 'Исходные данные'."""
         data_array = np.array(all_data, dtype=object)
         
@@ -181,13 +181,13 @@ class ExcelLoader:
         # Вычисляем автоматические диапазоны для каждого слоя
         self._per_layer_auto_range = {}
         for layer_name, calib_data in self.per_layer_calib.items():
-            auto_left, auto_right = XLSXLoader._find_layer_overlap_static(
+            auto_left, auto_right = self._find_layer_overlap_static(
                 calib_data["disp"], calib_data["tug"]
             )
             self._per_layer_auto_range[layer_name] = (auto_left, auto_right)
         
         # Загружаем результаты если есть лист "Результат расчета"
-        if "Результат расчета" in sheet_names:
+        if sheet_names and "Результат расчета" in sheet_names:
             result_ws = openpyxl.load_workbook(path, data_only=True, read_only=True)
             result_sheet = result_ws["Результат расчета"]
             result_data = list(result_sheet.iter_rows(values_only=True))
@@ -692,8 +692,7 @@ class XLSXLoader:
         ranges = [self._find_rising_range(disp, tv) for tv in tug_dict.values()]
         return self._merge_rising_ranges(ranges)
     
-    @staticmethod
-    def _find_layer_overlap_static(disp, tug_dict):
+    def _find_layer_overlap_static(self, disp, tug_dict):
         """Статический метод поиска области перекрытия для конкретного слоя."""
         # Создаем временный экземпляр для использования методов
         temp_loader = XLSXLoader()
