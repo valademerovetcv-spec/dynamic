@@ -3441,7 +3441,7 @@ class DinamikaApp:
                         ws_result.cell(row=2, column=res_col, value=ch_name)
                         time_col = 1  # Время уже в колонке 1
                         for i, val in enumerate(ch_data):
-                            if self.loader.dynamics_time and i < len(self.loader.dynamics_time):
+                            if self.loader.dynamics_time is not None and len(self.loader.dynamics_time) > 0 and i < len(self.loader.dynamics_time):
                                 ws_result.cell(row=i + 2, column=time_col, value=self.loader.dynamics_time[i])
                             ws_result.cell(row=i + 2, column=res_col, value=val)
                         res_col += 1
