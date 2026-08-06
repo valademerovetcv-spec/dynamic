@@ -3301,82 +3301,103 @@ class DinamikaApp:
             self.root.update_idletasks()
 
             wb_out = openpyxl.Workbook()
-            ws_out = wb_out.active
-            ws_out.title = "Результат"
-
-            # Write all dynamics channels starting from column B
-            dyn_col = 2  # column B (1-based)
+            ws = wb_out.active
+            ws.title = "Данные"
+            
+            # === Формат совместимый с load_excel ===
+            # Структура: Динамика | Тарировка | Результат
+            # Строка 1: Заголовок секции динамики | ... | Заголовок секции тарировки | ... | Заголовок секции результата
+            # Строка 2: Время, мсек | Каналы динамики | Перемещение, мм | Каналы тарировки | Время, мсек | Каналы результата
+            
+            col = 1
+            
+            # === Секция Динамика ===
+            ws.cell(row=1, column=col, value="Динамика в тугриках")
+            ws.cell(row=2, column=col, value="Время, мсек")
+            dyn_start_col = col
+            col += 1
+            
             if self.loader.dynamics_channels:
                 for ch_name, ch_data in self.loader.dynamics_channels.items():
-                    ws_out.cell(row=2, column=dyn_col, value=ch_name)
+                    ws.cell(row=2, column=col, value=ch_name)
                     for i, val in enumerate(ch_data):
-                        ws_out.cell(row=i + 3, column=1, value=self.loader.dynamics_time[i] if i < len(self.loader.dynamics_time) else None)
-                        ws_out.cell(row=i + 3, column=dyn_col, value=val)
-                    dyn_col += 1
-            else:
-                ws_out.cell(row=2, column=dyn_col, value="Слои")
+                        if i < len(self.loader.dynamics_time):
+                            ws.cell(row=i + 3, column=dyn_start_col, value=self.loader.dynamics_time[i])
+                        ws.cell(row=i + 3, column=col, value=val)
+                    col += 1
+            elif self.loader.source_data is not None:
+                ws.cell(row=2, column=col, value="Слои")
                 for i, (_, row) in enumerate(self.loader.source_data.iterrows()):
-                    ws_out.cell(row=i + 3, column=1, value=row.iloc[0])
-                    ws_out.cell(row=i + 3, column=dyn_col, value=row.iloc[1])
-                dyn_col += 1
-
-            # Section header for dynamics (col 1)
-            ws_out.cell(row=1, column=1, value="Динамика в тугриках")
-            ws_out.cell(row=2, column=1, value="Время, мсек")
-
-            # Calibration data starts after dynamics channels
-            cal_start = dyn_col
+                    ws.cell(row=i + 3, column=dyn_start_col, value=row.iloc[0])
+                    ws.cell(row=i + 3, column=col, value=row.iloc[1])
+                col += 1
+            
+            dyn_end_col = col - 1
+            
+            # === Секция Тарировка ===
+            calib_start_col = col
+            ws.cell(row=1, column=calib_start_col, value="Тарировка")
+            
             cal_disp_name = "Перемещение, мм"
             if self.loader.calib_data is not None and not self.loader.calib_data.empty:
                 cal_cols = list(self.loader.calib_data.columns)
                 cal_disp_name = cal_cols[0]
-
-            ws_out.cell(row=1, column=cal_start, value="Тарировка")
-            ws_out.cell(row=2, column=cal_start, value=cal_disp_name)
-
-            # Write displacement column
+            
+            ws.cell(row=2, column=calib_start_col, value=cal_disp_name)
+            col += 1
+            
             if self.loader.calib_data is not None:
                 for i, (_, row) in enumerate(self.loader.calib_data.iterrows()):
-                    ws_out.cell(row=i + 3, column=cal_start, value=row[cal_disp_name])
-
-            # Write all calibration channels
-            cal_ch_col = cal_start + 1
+                    ws.cell(row=i + 3, column=calib_start_col, value=row[cal_disp_name])
+            
             if self.loader.calib_channels:
                 for ch_name, ch_data in self.loader.calib_channels.items():
-                    ws_out.cell(row=2, column=cal_ch_col, value=ch_name)
+                    ws.cell(row=2, column=col, value=ch_name)
                     for i, val in enumerate(ch_data):
-                        ws_out.cell(row=i + 3, column=cal_ch_col, value=val)
-                    cal_ch_col += 1
+                        ws.cell(row=i + 3, column=col, value=val)
+                    col += 1
             elif self.loader.calib_data is not None and len(cal_cols) > 1:
                 cal_val_name = cal_cols[1]
-                ws_out.cell(row=2, column=cal_ch_col, value=cal_val_name)
+                ws.cell(row=2, column=col, value=cal_val_name)
                 for i, (_, row) in enumerate(self.loader.calib_data.iterrows()):
-                    ws_out.cell(row=i + 3, column=cal_ch_col, value=row[cal_val_name])
-                cal_ch_col += 1
+                    ws.cell(row=i + 3, column=col, value=row[cal_val_name])
+                col += 1
+            
+            calib_end_col = col - 1
+            
+            # === Секция Результат ===
+            if self.loader.result_df is not None and not self.loader.result_df.empty:
+                res_start_col = col
+                ws.cell(row=1, column=res_start_col, value="Динамика в мм")
+                ws.cell(row=2, column=res_start_col, value="Время, мсек")
+                col += 1
+                
+                if self.loader.result_channels:
+                    for ch_name, ch_data in self.loader.result_channels.items():
+                        ws.cell(row=2, column=col, value=ch_name)
+                        for i, val in enumerate(ch_data):
+                            if i < len(self.loader.result_df):
+                                ws.cell(row=i + 3, column=res_start_col, value=self.loader.result_df.iloc[i, 0])
+                            ws.cell(row=i + 3, column=col, value=val)
+                        col += 1
+                else:
+                    ws.cell(row=2, column=col, value="Перемещение, мм")
+                    for i, (_, row) in enumerate(self.loader.result_df.iterrows()):
+                        ws.cell(row=i + 3, column=res_start_col, value=row["Время, мсек"])
+                        ws.cell(row=i + 3, column=col, value=row["Перемещение, мм"])
+                    col += 1
+            
+            # === Лист Температуры (если есть) ===
+            if hasattr(self.loader, 'temp_data') and self.loader.temp_data is not None and not self.loader.temp_data.empty:
+                ws_temp = wb_out.create_sheet(title="Температуры")
+                for col_idx, col_name in enumerate(self.loader.temp_data.columns, 1):
+                    ws_temp.cell(row=1, column=col_idx, value=col_name)
+                    for row_idx, val in enumerate(self.loader.temp_data[col_name], 2):
+                        ws_temp.cell(row=row_idx, column=col_idx, value=val)
 
-            # Result data starts after calibration channels
-            res_start = cal_ch_col
-
-            # Result data
-            ws_out.cell(row=1, column=res_start, value="Динамика в мм")
-            ws_out.cell(row=2, column=res_start, value="Время, мсек")
-            res_col = res_start + 1
-
-            if self.loader.result_channels:
-                for ch_name, ch_data in self.loader.result_channels.items():
-                    ws_out.cell(row=2, column=res_col, value=ch_name)
-                    for i, val in enumerate(ch_data):
-                        ws_out.cell(row=i + 3, column=res_start, value=self.loader.result_df.iloc[i, 0] if i < len(self.loader.result_df) else None)
-                        ws_out.cell(row=i + 3, column=res_col, value=val)
-                    res_col += 1
-            else:
-                ws_out.cell(row=2, column=res_col, value="Перемещение, мм")
-                for i, (_, row) in enumerate(self.loader.result_df.iterrows()):
-                    ws_out.cell(row=i + 3, column=res_start, value=row["Время, мсек"])
-                    ws_out.cell(row=i + 3, column=res_col, value=row["Перемещение, мм"])
-
-            for col, w in {"A": 15, "B": 12, "D": 16, "E": 12, "S": 15, "T": 16}.items():
-                ws_out.column_dimensions[col].width = w
+            # Set column widths
+            for c in range(1, col + 1):
+                ws.column_dimensions[openpyxl.utils.get_column_letter(c)].width = 14
 
             wb_out.save(path)
             wb_out.close()
