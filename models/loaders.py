@@ -691,3 +691,11 @@ class XLSXLoader:
         """Поиск области перекрытия для конкретного слоя."""
         ranges = [self._find_rising_range(disp, tv) for tv in tug_dict.values()]
         return self._merge_rising_ranges(ranges)
+    
+    @staticmethod
+    def _find_layer_overlap_static(disp, tug_dict):
+        """Статический метод поиска области перекрытия для конкретного слоя."""
+        # Создаем временный экземпляр для использования методов
+        temp_loader = XLSXLoader()
+        ranges = [temp_loader._find_rising_range(disp, tv) for tv in tug_dict.values()]
+        return temp_loader._merge_rising_ranges(ranges)
