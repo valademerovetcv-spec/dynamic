@@ -252,7 +252,8 @@ class ExcelLoader:
         self._per_layer_auto_range = {}
         temp_xlsx_loader = XLSXLoader()
         for layer_name, calib_data in self.per_layer_calib.items():
-            if calib_data.get("disp") is not None and len(calib_data["disp"]) > 0:
+            disp_arr = calib_data.get("disp")
+            if disp_arr is not None and hasattr(disp_arr, '__len__') and len(disp_arr) > 0:
                 auto_left, auto_right = temp_xlsx_loader._find_layer_overlap_static(
                     calib_data["disp"], calib_data.get("tug", {})
                 )
@@ -412,10 +413,12 @@ class ExcelLoader:
         self._per_layer_auto_range = {}
         temp_xlsx_loader = XLSXLoader()
         for layer_name, calib_data in self.per_layer_calib.items():
-            auto_left, auto_right = temp_xlsx_loader._find_layer_overlap_static(
-                calib_data["disp"], calib_data["tug"]
-            )
-            self._per_layer_auto_range[layer_name] = (auto_left, auto_right)
+            disp_arr = calib_data.get("disp")
+            if disp_arr is not None and hasattr(disp_arr, '__len__') and len(disp_arr) > 0:
+                auto_left, auto_right = temp_xlsx_loader._find_layer_overlap_static(
+                    calib_data["disp"], calib_data.get("tug", {})
+                )
+                self._per_layer_auto_range[layer_name] = (auto_left, auto_right)
         
         # Загружаем результаты если есть лист "Результат расчета"
         if sheet_names is not None and "Результат расчета" in sheet_names:
@@ -851,8 +854,9 @@ class XLSXLoader:
         self.per_layer_calib[layer_name] = {"disp": disp_col, "tug": tug_cols}
         
         # Вычисляем автоматический диапазон перекрытия
-        auto_left, auto_right = self._find_layer_overlap(disp_col, tug_cols)
-        self._per_layer_auto_range[layer_name] = (auto_left, auto_right)
+        if len(disp_col) > 0 and tug_cols:
+            auto_left, auto_right = self._find_layer_overlap(disp_col, tug_cols)
+            self._per_layer_auto_range[layer_name] = (auto_left, auto_right)
         
         # Сохраняем информацию о загруженной калибровке для быстрого доступа
         sensor_names = list(tug_cols.keys())
