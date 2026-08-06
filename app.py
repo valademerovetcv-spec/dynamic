@@ -3303,6 +3303,7 @@ class DinamikaApp:
         self.temp_stats_text.insert(tk.END, "\n".join(lines))
 
     def save_file(self):
+        logger.info("=== Начало сохранения файла ===")
         if self.loader.result_df is None or self.loader.result_df.empty:
             messagebox.showwarning("Внимание", "Нет данных для сохранения. Сначала выполните расчёт.")
             return
@@ -3334,6 +3335,9 @@ class DinamikaApp:
             # ===========================================
             ws_dyn = wb_out.active
             ws_dyn.title = "Динамика"
+            
+            logger.info(f"Лист 'Динамика': dynamics_channels={self.loader.dynamics_channels.keys() if self.loader.dynamics_channels else None}")
+            logger.info(f"Лист 'Динамика': dynamics_time length={len(self.loader.dynamics_time) if self.loader.dynamics_time else 0}")
             
             # Заголовки
             ws_dyn.cell(row=1, column=1, value="Время, мсек")
@@ -3370,10 +3374,16 @@ class DinamikaApp:
             
             # Данные тарировки по слоям и датчикам
             row_idx = 2
+            logger.info(f"Лист 'Тарировка': per_layer_calib exists={self.loader.per_layer_calib is not None}")
             if self.loader.per_layer_calib:
+                logger.info(f"Лист 'Тарировка': количество слоев={len(self.loader.per_layer_calib)}")
                 for layer_name, calib_data in self.loader.per_layer_calib.items():
+                    logger.info(f"  Слой '{layer_name}': calib_data keys={calib_data.keys() if isinstance(calib_data, dict) else type(calib_data)}")
                     disp_vals = calib_data.get("disp", [])
                     tug_data = calib_data.get("tug", {})
+                    
+                    logger.info(f"    disp_vals type={type(disp_vals)}, value={disp_vals if not hasattr(disp_vals, '__len__') or len(disp_vals) < 10 else f'array[{len(disp_vals)}]'}")
+                    logger.info(f"    tug_data keys={tug_data.keys() if isinstance(tug_data, dict) else type(tug_data)}")
                     
                     # Проверка на numpy массив или список
                     if hasattr(disp_vals, '__len__') and not isinstance(disp_vals, (str, bytes)):
@@ -3382,6 +3392,8 @@ class DinamikaApp:
                         n_disp = 0
                     
                     for sensor_name, sensor_data in tug_data.items():
+                        logger.info(f"      Датчик '{sensor_name}': type={type(sensor_data)}, value={sensor_data if not hasattr(sensor_data, '__len__') or len(sensor_data) < 10 else f'array[{len(sensor_data)}]'}")
+                        
                         # Проверка на numpy массив или список
                         if hasattr(sensor_data, '__len__') and not isinstance(sensor_data, (str, bytes)):
                             n_sensor = len(sensor_data)
@@ -3389,12 +3401,13 @@ class DinamikaApp:
                             n_sensor = 0
                         
                         n = min(n_disp, n_sensor)
+                        logger.info(f"      n_disp={n_disp}, n_sensor={n_sensor}, n={n}")
                         
                         for i in range(n):
                             ws_calib.cell(row=row_idx, column=1, value=f"Слой: {layer_name}")
                             ws_calib.cell(row=row_idx, column=2, value=sensor_name)
-                            ws_calib.cell(row=row_idx, column=3, value=float(disp_vals[i]))
-                            ws_calib.cell(row=row_idx, column=4, value=float(sensor_data[i]))
+                            ws_calib.cell(row=row_idx, column=3, float(disp_vals[i]))
+                            ws_calib.cell(row=row_idx, column=4, float(sensor_data[i]))
                             row_idx += 1
             
             # Автоширина колонок
@@ -3412,15 +3425,19 @@ class DinamikaApp:
             
             # Записываем основные результаты
             res_col = 3
+            logger.info(f"Лист 'Результат': result_df empty={self.loader.result_df.empty if self.loader.result_df is not None else True}")
             if self.loader.result_df is not None and not self.loader.result_df.empty:
                 for i, (_, row) in enumerate(self.loader.result_df.iterrows()):
                     ws_result.cell(row=i + 2, column=1, value=row.get("Время, мсек", 0))
                     ws_result.cell(row=i + 2, column=2, value=row.get("Перемещение, мм", 0))
                 
                 # Если есть результаты по всем каналам (слоям)
+                logger.info(f"Лист 'Результат': result_channels exists={self.loader.result_channels is not None}")
                 if self.loader.result_channels:
+                    logger.info(f"Лист 'Результат': количество каналов={len(self.loader.result_channels)}")
                     ws_result.cell(row=1, column=res_col, value="Перемещения по слоям")
                     for ch_name, ch_data in self.loader.result_channels.items():
+                        logger.info(f"  Канал '{ch_name}': type={type(ch_data)}, length={len(ch_data) if hasattr(ch_data, '__len__') else 'N/A'}")
                         ws_result.cell(row=2, column=res_col, value=ch_name)
                         time_col = 1  # Время уже в колонке 1
                         for i, val in enumerate(ch_data):
@@ -3438,7 +3455,9 @@ class DinamikaApp:
             wb_out.save(path)
             wb_out.close()
             self.status_var.set(f"Сохранено: {Path(path).name}")
+            logger.info("=== Успешное завершение сохранения ===")
         except Exception as e:
+            logger.error(f"Ошибка сохранения: {e}", exc_info=True)
             messagebox.showerror("Ошибка сохранения", str(e))
             self.status_var.set("Ошибка сохранения")
 
