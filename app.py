@@ -3363,25 +3363,34 @@ class DinamikaApp:
             
             # ===========================================
             # ЛИСТ 2: Тарировка
+            # Формат: слой1 | Датчик Холла 1 | Датчик Холла 2 | ...
             # ===========================================
             ws_calib = wb_out.create_sheet(title="Тарировка")
             
-            # Заголовки
-            ws_calib.cell(row=1, column=1, value="Слой")
-            ws_calib.cell(row=1, column=2, value="Датчик")
-            ws_calib.cell(row=1, column=3, value="Перемещение, мм")
-            ws_calib.cell(row=1, column=4, value="Показания, мВ")
+            # Собираем все имена датчиков из всех слоев
+            all_sensors = set()
+            if self.loader.per_layer_calib:
+                for layer_data in self.loader.per_layer_calib.values():
+                    tug_data = layer_data.get("tug", {})
+                    if isinstance(tug_data, dict):
+                        all_sensors.update(tug_data.keys())
+            all_sensors = sorted(list(all_sensors))
             
-            # Данные тарировки по слоям и датчикам
+            # Заголовки: Слой | Датчик 1 | Датчик 2 | ...
+            ws_calib.cell(row=1, column=1, value="Слой")
+            for col_idx, sensor_name in enumerate(all_sensors, start=2):
+                ws_calib.cell(row=1, column=col_idx, value=sensor_name)
+            
+            # Данные тарировки по слоям
             row_idx = 2
             logger.info(f"Лист 'Тарировка': per_layer_calib exists={self.loader.per_layer_calib is not None}")
             if self.loader.per_layer_calib:
                 logger.info(f"Лист 'Тарировка': количество слоев={len(self.loader.per_layer_calib)}")
                 for layer_name, calib_data in self.loader.per_layer_calib.items():
-                    logger.info(f"  Слой '{layer_name}': calib_data keys={calib_data.keys() if isinstance(calib_data, dict) else type(calib_data)}")
                     disp_vals = calib_data.get("disp", [])
                     tug_data = calib_data.get("tug", {})
                     
+                    logger.info(f"  Слой '{layer_name}': calib_data keys={calib_data.keys() if isinstance(calib_data, dict) else type(calib_data)}")
                     logger.info(f"    disp_vals type={type(disp_vals)}, value={disp_vals if not hasattr(disp_vals, '__len__') or len(disp_vals) < 10 else f'array[{len(disp_vals)}]'}")
                     logger.info(f"    tug_data keys={tug_data.keys() if isinstance(tug_data, dict) else type(tug_data)}")
                     
@@ -3391,29 +3400,33 @@ class DinamikaApp:
                     else:
                         n_disp = 0
                     
-                    for sensor_name, sensor_data in tug_data.items():
-                        logger.info(f"      Датчик '{sensor_name}': type={type(sensor_data)}, value={sensor_data if not hasattr(sensor_data, '__len__') or len(sensor_data) < 10 else f'array[{len(sensor_data)}]'}")
+                    # Записываем данные для каждого значения перемещения
+                    for i in range(n_disp):
+                        ws_calib.cell(row=row_idx, column=1, value=f"{layer_name}")
                         
-                        # Проверка на numpy массив или список
-                        if hasattr(sensor_data, '__len__') and not isinstance(sensor_data, (str, bytes)):
-                            n_sensor = len(sensor_data)
-                        else:
-                            n_sensor = 0
+                        # Для каждого датчика записываем значение в свою колонку
+                        for col_idx, sensor_name in enumerate(all_sensors, start=2):
+                            sensor_data = tug_data.get(sensor_name, [])
+                            if hasattr(sensor_data, '__len__') and not isinstance(sensor_data, (str, bytes)) and i < len(sensor_data):
+                                ws_calib.cell(row=row_idx, column=col_idx, value=float(sensor_data[i]))
+                            else:
+                                ws_calib.cell(row=row_idx, column=col_idx, value="")
                         
-                        n = min(n_disp, n_sensor)
-                        logger.info(f"      n_disp={n_disp}, n_sensor={n_sensor}, n={n}")
-                        
-                        for i in range(n):
-                            ws_calib.cell(row=row_idx, column=1, value=f"Слой: {layer_name}")
-                            ws_calib.cell(row=row_idx, column=2, value=sensor_name)
-                            ws_calib.cell(row=row_idx, column=3, value=float(disp_vals[i]))
-                            ws_calib.cell(row=row_idx, column=4, value=float(sensor_data[i]))
-                            row_idx += 1
+                        # Дополнительно записываем перемещение в последнюю колонку после всех датчиков
+                        ws_calib.cell(row=row_idx, column=len(all_sensors) + 2, value=float(disp_vals[i]))
+                        row_idx += 1
+            
+            # Добавляем заголовок для колонки перемещения
+            ws_calib.cell(row=1, column=len(all_sensors) + 2, value="Перемещение, мм")
             
             # Автоширина колонок
-            for col_idx in range(1, 5):
+            ws_calib.column_dimensions["A"].width = 20
+            for col_idx, sensor_name in enumerate(all_sensors, start=2):
                 col_letter = openpyxl.utils.get_column_letter(col_idx)
                 ws_calib.column_dimensions[col_letter].width = 18
+            # Колонка с перемещением
+            disp_col_letter = openpyxl.utils.get_column_letter(len(all_sensors) + 2)
+            ws_calib.column_dimensions[disp_col_letter].width = 18
             
             # ===========================================
             # ЛИСТ 3: Результат расчета
