@@ -244,22 +244,23 @@ class ExcelLoader:
                 
                 # Результаты по слоям
                 self.result_channels = {}
-                for c in range(2, len(result_data[1]) if len(result_data) > 1 else 0):
-                    ch_name = result_data[1][c] if c < len(result_data[1]) else None
-                    if not ch_name:
-                        continue
-                    ch_vals = []
-                    for row in result_array:
-                        val = row[c] if c < len(row) else None
-                        try:
-                            ch_vals.append(float(val) if val is not None else np.nan)
-                        except (ValueError, TypeError):
-                            ch_vals.append(np.nan)
-                    ch_vals = np.array(ch_vals)
-                    ch_mask = ~np.isnan(ch_vals)
-                    ch_vals = ch_vals[ch_mask]
-                    if len(ch_vals) > 0:
-                        self.result_channels[ch_name] = np.round(ch_vals, 3)
+                if len(result_data) > 1:
+                    for c in range(2, len(result_data[1]) if len(result_data) > 1 else 0):
+                        ch_name = result_data[1][c] if c < len(result_data[1]) else None
+                        if not ch_name:
+                            continue
+                        ch_vals = []
+                        for row in result_array:
+                            val = row[c] if c < len(row) else None
+                            try:
+                                ch_vals.append(float(val) if val is not None else np.nan)
+                            except (ValueError, TypeError):
+                                ch_vals.append(np.nan)
+                        ch_vals = np.array(ch_vals)
+                        ch_mask = ~np.isnan(ch_vals)
+                        ch_vals = ch_vals[ch_mask]
+                        if len(ch_vals) > 0:
+                            self.result_channels[ch_name] = np.round(ch_vals, 3)
         
         return self.source_data, self.per_layer_calib
     

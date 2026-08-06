@@ -3061,8 +3061,22 @@ class DinamikaApp:
         elif self.loader.calib_channels and self.loader.magnet_position is not None:
             disp = self.loader.calib_disp
 
+            if disp is None or len(disp) == 0 or not self.loader.calib_channels:
+                self.magnet_ax.text(0.5, 0.5, "Нет данных тарировки",
+                                    ha="center", va="center", transform=self.magnet_ax.transAxes,
+                                    fontsize=13, color="#94a3b8", style="italic")
+                self.magnet_ax.set_axis_off()
+                return
+
             x_min, x_max = disp.min(), disp.max()
-            all_tugs = np.concatenate(list(self.loader.calib_channels.values()))
+            tug_vals = [v for v in self.loader.calib_channels.values() if len(v) > 0]
+            if not tug_vals:
+                self.magnet_ax.text(0.5, 0.5, "Нет данных датчиков Холла",
+                                    ha="center", va="center", transform=self.magnet_ax.transAxes,
+                                    fontsize=13, color="#94a3b8", style="italic")
+                self.magnet_ax.set_axis_off()
+                return
+            all_tugs = np.concatenate(tug_vals)
             y_min, y_max = all_tugs.min(), all_tugs.max()
             y_margin = (y_max - y_min) * 0.05
             self.magnet_ax.set_xlim(x_min, x_max)
