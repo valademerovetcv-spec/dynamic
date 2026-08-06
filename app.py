@@ -3334,7 +3334,7 @@ class DinamikaApp:
             
             dyn_end_col = col - 1
             
-            # === Секция Тарировка ===
+            # === Секция Тарировка (общая + по слоям) ===
             calib_start_col = col
             ws.cell(row=1, column=calib_start_col, value="Тарировка")
             
@@ -3346,6 +3346,7 @@ class DinamikaApp:
             ws.cell(row=2, column=calib_start_col, value=cal_disp_name)
             col += 1
             
+            # Сохраняем общую тарировку если есть
             if self.loader.calib_data is not None:
                 for i, (_, row) in enumerate(self.loader.calib_data.iterrows()):
                     ws.cell(row=i + 3, column=calib_start_col, value=row[cal_disp_name])
@@ -3362,6 +3363,39 @@ class DinamikaApp:
                 for i, (_, row) in enumerate(self.loader.calib_data.iterrows()):
                     ws.cell(row=i + 3, column=col, value=row[cal_val_name])
                 col += 1
+            
+            # Сохраняем тарировку по слоям (per_layer_calib)
+            if hasattr(self.loader, 'per_layer_calib') and self.loader.per_layer_calib:
+                # Добавляем лист для тарировки по слоям
+                ws_layers = wb_out.create_sheet(title="Тарировка по слоям")
+                ws_layers.cell(row=1, column=1, value="Слой")
+                ws_layers.cell(row=1, column=2, value="Перемещение, мм")
+                
+                current_row = 2
+                current_col = 2  # Колонка B для перемещения
+                
+                for layer_name, calib_data in self.loader.per_layer_calib.items():
+                    # Записываем имя слоя
+                    ws_layers.cell(row=current_row, column=1, value=layer_name)
+                    
+                    # Получаем данные перемещения
+                    disp_data = calib_data.get("disp", [])
+                    tug_data = calib_data.get("tug", {})
+                    
+                    # Записываем перемещение
+                    for i, disp_val in enumerate(disp_data):
+                        ws_layers.cell(row=current_row + i, column=current_col, value=disp_val)
+                    
+                    # Записываем каждый датчик тарировки для этого слоя
+                    for sensor_name, sensor_vals in tug_data.items():
+                        ws_layers.cell(row=current_row - 1, column=current_col + 1, value=sensor_name)
+                        for i, val in enumerate(sensor_vals):
+                            ws_layers.cell(row=current_row + i, column=current_col + 1, value=val)
+                        current_col += 1
+                    
+                    # Переходим к следующему слою с отступом
+                    current_row += len(disp_data) + 2
+                    current_col = 2  # Сбрасываем колонку для следующего слоя
             
             calib_end_col = col - 1
             

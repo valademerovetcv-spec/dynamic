@@ -161,6 +161,71 @@ class ExcelLoader:
             self.result_df = None
             self.result_channels = {}
         
+        # Загружаем тарировку по слоям из листа "Тарировка по слоям" если есть
+        try:
+            if "Тарировка по слоям" in wb.sheetnames:
+                ws_layers = wb["Тарировка по слоям"]
+                layers_data = list(ws_layers.iter_rows(values_only=True))
+                
+                if len(layers_data) > 1:
+                    # Инициализируем словари если нужно
+                    if not hasattr(self, 'per_layer_calib') or self.per_layer_calib is None:
+                        self.per_layer_calib = {}
+                    
+                    current_layer = None
+                    current_disp = []
+                    current_tug = {}
+                    tug_col_names = {}
+                    
+                    for row_idx, row in enumerate(layers_data):
+                        if row_idx == 0:  # Заголовок
+                            # Получаем имена колонок для датчиков
+                            for col_idx, val in enumerate(row):
+                                if col_idx >= 2 and val:  # Начиная с колонки C (индекс 2)
+                                    tug_col_names[col_idx] = val
+                            continue
+                        
+                        # Проверяем первую колонку - имя слоя
+                        layer_val = row[0] if len(row) > 0 else None
+                        
+                        if layer_val and isinstance(layer_val, str) and layer_val.strip():
+                            # Сохраняем предыдущий слой если есть
+                            if current_layer and current_disp:
+                                self.per_layer_calib[current_layer] = {
+                                    "disp": np.array(current_disp, dtype=float),
+                                    "tug": {name: np.array(vals, dtype=float) for name, vals in current_tug.items()}
+                                }
+                            
+                            # Начинаем новый слой
+                            current_layer = layer_val.strip()
+                            current_disp = []
+                            current_tug = {name: [] for name in tug_col_names.values()}
+                        
+                        # Если это строка данных (не заголовок и не новый слой)
+                        if current_layer and len(row) > 1:
+                            disp_val = row[1] if len(row) > 1 else None
+                            if disp_val is not None and not isinstance(disp_val, str):
+                                current_disp.append(float(disp_val))
+                            
+                            # Читаем значения датчиков
+                            for col_idx, tug_name in tug_col_names.items():
+                                if col_idx < len(row):
+                                    tug_val = row[col_idx]
+                                    if tug_val is not None and not isinstance(tug_val, str):
+                                        if tug_name not in current_tug:
+                                            current_tug[tug_name] = []
+                                        current_tug[tug_name].append(float(tug_val))
+                    
+                    # Сохраняем последний слой
+                    if current_layer and current_disp:
+                        self.per_layer_calib[current_layer] = {
+                            "disp": np.array(current_disp, dtype=float),
+                            "tug": {name: np.array(vals, dtype=float) for name, vals in current_tug.items()}
+                        }
+        except Exception as e:
+            # Игнорируем ошибки при загрузке тарировки по слоям
+            pass
+        
         return self.source_data, self.calib_data
 
     def _load_excel_legacy(self, path):
