@@ -3351,13 +3351,14 @@ class DinamikaApp:
             
             # --- Секция Тарировка по слоям ---
             calib_start_col = dyn_col
-            ws_raw.cell(row=1, column=calib_start_col, value="Тарировка")
+            # Не пишем "Тарировка" в отдельную ячейку, начинаем сразу со слоев
+            # Каждый слой имеет свой заголовок в строке 1
             
             if self.loader.per_layer_calib:
                 # Для каждого слоя создаём свою секцию
                 layer_col = calib_start_col
                 for layer_name, calib_data in self.loader.per_layer_calib.items():
-                    # Заголовок слоя в строке 1
+                    # Заголовок слоя в строке 1 - НАД колонкой перемещения
                     ws_raw.cell(row=1, column=layer_col, value=f"Слой: {layer_name}")
                     
                     # Перемещение - заголовок в строке 2, данные с строки 3
