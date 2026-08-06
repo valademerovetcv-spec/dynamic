@@ -2980,11 +2980,24 @@ class DinamikaApp:
         if self.loader.per_layer_calib:
             visible_any = False
             all_cals = list(self.loader.per_layer_calib.values())
-            all_disp = np.concatenate([c["disp"] for c in all_cals])
+            
+            # Проверяем наличие данных перед конкатенацией
+            all_disp_parts = [c["disp"] for c in all_cals if "disp" in c and len(c.get("disp", [])) > 0]
             all_tug_vals = []
             for c in all_cals:
-                for v in c["tug"].values():
-                    all_tug_vals.append(v)
+                if "tug" in c:
+                    for v in c["tug"].values():
+                        if len(v) > 0:
+                            all_tug_vals.append(v)
+            
+            if not all_disp_parts or not all_tug_vals:
+                self.magnet_ax.text(0.5, 0.5, "Нет данных тарировки",
+                                    ha="center", va="center", transform=self.magnet_ax.transAxes,
+                                    fontsize=13, color="#94a3b8", style="italic")
+                self.magnet_ax.set_axis_off()
+                return
+            
+            all_disp = np.concatenate(all_disp_parts)
             all_tugs = np.concatenate(all_tug_vals)
             self.magnet_ax.set_xlim(all_disp.min(), all_disp.max())
             y_margin = (all_tugs.max() - all_tugs.min()) * 0.05
@@ -3339,10 +3352,10 @@ class DinamikaApp:
                     for i, val in enumerate(calib_data["disp"]):
                         ws_raw.cell(row=i + 4, column=disp_col, value=val)
                     
-                    # Датчики Холла для этого слоя
+                    # Датчики Холла для этого слоя - заголовки в строке 2, данные с строки 4
                     sensor_col = layer_col + 1
                     for sensor_name, sensor_data in calib_data["tug"].items():
-                        ws_raw.cell(row=3, column=sensor_col, value=sensor_name)
+                        ws_raw.cell(row=2, column=sensor_col, value=sensor_name)
                         for i, val in enumerate(sensor_data):
                             ws_raw.cell(row=i + 4, column=sensor_col, value=val)
                         sensor_col += 1
