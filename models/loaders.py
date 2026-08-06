@@ -9,6 +9,20 @@ import openpyxl
 class ExcelLoader:
     """Загрузка данных из Excel файлов."""
     
+    def __init__(self):
+        """Инициализация атрибутов загрузчика."""
+        self.source_data = None
+        self.calib_data = None
+        self.dynamics_time = None
+        self.dynamics_channels = None
+        self.calib_disp = None
+        self.calib_channels = None
+        self.result_df = None
+        self.result_channels = {}
+        self.per_layer_calib = {}
+        self._per_layer_auto_range = {}
+        self._per_layer_calib_info = {}
+    
     def load_excel(self, path):
         """Загрузка данных из Excel файла (основной формат)."""
         # Быстрая загрузка через pandas с оптимизациями
@@ -242,7 +256,7 @@ class ExcelLoader:
                     if len(ch_vals) > 0:
                         self.result_channels[ch_name] = np.round(ch_vals, 3)
         
-        return self.source_data, self.calib_data
+        return self.source_data, self.per_layer_calib
     
     def _load_result_format_excel(self, all_data, path):
         """Загрузка файла по листу 'Результат расчета'."""
@@ -264,7 +278,7 @@ class ExcelLoader:
                 "Перемещение, мм": res_disp[:n_res]
             })
         
-        return self.source_data, self.calib_data
+        return self.source_data, self.per_layer_calib
     
     def _load_old_format_excel(self, path):
         """Загрузка старого формата Excel файлов."""
@@ -416,7 +430,7 @@ class ExcelLoader:
             self.result_df = None
             self.result_channels = {}
         
-        return self.source_data, self.calib_data
+        return self.source_data, self.per_layer_calib
 
     def _load_excel_legacy(self, path):
         """Загрузка устаревшего формата Excel файлов."""
@@ -446,7 +460,7 @@ class ExcelLoader:
         })
 
         wb.close()
-        return self.source_data, self.calib_data
+        return self.source_data, self.per_layer_calib
 
 
 class CSVLoader:
