@@ -29,19 +29,16 @@ class ExcelLoader:
         # Используем openpyxl в режиме read_only для ускорения чтения больших файлов
         wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
         
-        # Проверяем наличие листа "Исходные данные" или "Результат расчета"
+        # Проверяем наличие листов "Динамика", "Тарировка", "Результат расчета"
         sheet_names = wb.sheetnames
-        target_sheet = None
         
-        # Ищем лист "Исходные данные" (новый формат)
+        # Новый формат: отдельные листы "Динамика", "Тарировка", "Результат расчета"
+        if "Динамика" in sheet_names:
+            return self._load_separated_sheets_excel(wb, path)
+        
+        # Старый формат: лист "Исходные данные"
         if "Исходные данные" in sheet_names:
-            target_sheet = "Исходные данные"
-        # Или лист "Результат расчета" (для загрузки ранее сохранённого файла)
-        elif "Результат расчета" in sheet_names:
-            target_sheet = "Результат расчета"
-        
-        if target_sheet:
-            ws = wb[target_sheet]
+            ws = wb["Исходные данные"]
             all_data = list(ws.iter_rows(values_only=True))
             wb.close()
             
@@ -50,9 +47,218 @@ class ExcelLoader:
             elif len(all_data) >= 2 and all_data[0][0] == "Результат расчета":
                 return self._load_result_format_excel(all_data, path)
         
+        # Или лист "Результат расчета" (для загрузки ранее сохранённого файла)
+        if "Результат расчета" in sheet_names:
+            ws = wb["Результат расчета"]
+            all_data = list(ws.iter_rows(values_only=True))
+            wb.close()
+            if len(all_data) >= 2:
+                return self._load_result_format_excel(all_data, path)
+        
         # Если не нашли новый формат, используем старый парсер
         wb.close()
         return self._load_old_format_excel(path)
+    
+    def _load_separated_sheets_excel(self, wb, path):
+        """Загрузка формата с раздельными листами: Динамика, Тарировка, Результат расчета."""
+        # Лист Динамика
+        if "Динамика" in wb.sheetnames:
+            ws_dyn = wb["Динамика"]
+            dyn_data = list(ws_dyn.iter_rows(values_only=True))
+            
+            if len(dyn_data) >= 2:
+                # Первая строка - заголовки, вторая и далее - данные
+                headers = dyn_data[0]
+                data_rows = dyn_data[1:]
+                
+                # Время из первой колонки
+                time_vals = []
+                for row in data_rows:
+                    if row and len(row) > 0 and row[0] is not None:
+                        try:
+                            time_vals.append(float(row[0]))
+                        except (ValueError, TypeError):
+                            time_vals.append(np.nan)
+                
+                time_array = np.array(time_vals)
+                time_mask = ~np.isnan(time_array)
+                self.dynamics_time = time_array[time_mask]
+                n_time = len(self.dynamics_time)
+                
+                # Каналы динамики из остальных колонок
+                self.dynamics_channels = {}
+                if headers:
+                    for col_idx in range(1, len(headers)):
+                        ch_name = headers[col_idx] if col_idx < len(headers) else None
+                        if not ch_name:
+                            continue
+                        
+                        ch_vals = []
+                        for row in data_rows:
+                            if row and len(row) > col_idx and row[col_idx] is not None:
+                                try:
+                                    ch_vals.append(float(row[col_idx]))
+                                except (ValueError, TypeError):
+                                    ch_vals.append(np.nan)
+                        
+                        ch_array = np.array(ch_vals)
+                        ch_mask = ~np.isnan(ch_array)
+                        ch_clean = ch_array[ch_mask][:n_time]
+                        
+                        if len(ch_clean) > 0 and not np.all(ch_clean == 0):
+                            self.dynamics_channels[ch_name] = ch_clean
+                
+                if self.dynamics_time is not None and self.dynamics_channels:
+                    first_key = list(self.dynamics_channels.keys())[0]
+                    self.source_data = pd.DataFrame({
+                        "Время, мсек": self.dynamics_time,
+                        "Слои": self.dynamics_channels[first_key]
+                    })
+                elif self.dynamics_time is not None:
+                    self.source_data = pd.DataFrame({"Время, мсек": self.dynamics_time})
+        
+        # Лист Тарировка
+        if "Тарировка" in wb.sheetnames:
+            ws_calib = wb["Тарировка"]
+            calib_data = list(ws_calib.iter_rows(values_only=True))
+            
+            if len(calib_data) >= 2:
+                # Заголовки: Слой, Датчик, Перемещение, Показания
+                # Данные начиная со второй строки
+                self.per_layer_calib = {}
+                
+                # Сначала группируем данные по слою и датчику
+                layer_sensor_data = {}  # {layer_name: {sensor_name: [(disp, reading), ...]}}
+                
+                for row in calib_data[1:]:
+                    if not row or len(row) < 4:
+                        continue
+                    
+                    layer_raw = row[0]
+                    sensor_name = row[1]
+                    disp_val = row[2]
+                    reading_val = row[3]
+                    
+                    if layer_raw is None or sensor_name is None:
+                        continue
+                    
+                    layer_name = str(layer_raw).replace("Слой:", "").strip()
+                    
+                    if layer_name not in layer_sensor_data:
+                        layer_sensor_data[layer_name] = {}
+                    
+                    if sensor_name not in layer_sensor_data[layer_name]:
+                        layer_sensor_data[layer_name][sensor_name] = []
+                    
+                    if disp_val is not None and reading_val is not None:
+                        try:
+                            layer_sensor_data[layer_name][sensor_name].append((float(disp_val), float(reading_val)))
+                        except (ValueError, TypeError):
+                            pass
+                
+                # Преобразуем в нужный формат
+                for layer_name, sensors in layer_sensor_data.items():
+                    all_disps = []
+                    tug_cols = {}
+                    
+                    for sensor_name, pairs in sensors.items():
+                        # Извлекаем перемещения и показания
+                        disps = [p[0] for p in pairs]
+                        readings = [p[1] for p in pairs]
+                        
+                        # Сохраняем перемещения (они должны быть одинаковыми для всех датчиков слоя)
+                        if not all_disps:
+                            all_disps = disps
+                        
+                        # Сохраняем показания датчика
+                        if readings:
+                            tug_cols[sensor_name] = np.round(np.array(readings), 3)
+                    
+                    if all_disps:
+                        self.per_layer_calib[layer_name] = {
+                            "disp": np.round(np.array(all_disps), 3),
+                            "tug": tug_cols
+                        }
+        
+        # Лист Результат расчета
+        if "Результат расчета" in wb.sheetnames:
+            ws_result = wb["Результат расчета"]
+            result_data = list(ws_result.iter_rows(values_only=True))
+            
+            if len(result_data) >= 2:
+                headers = result_data[0]
+                data_rows = result_data[1:]
+                
+                # Время и перемещение из первых двух колонок
+                res_time = []
+                res_disp = []
+                
+                for row in data_rows:
+                    if not row or len(row) < 2:
+                        continue
+                    
+                    t_val = row[0] if len(row) > 0 else None
+                    d_val = row[1] if len(row) > 1 else None
+                    
+                    try:
+                        res_time.append(float(t_val) if t_val is not None else np.nan)
+                        res_disp.append(float(d_val) if d_val is not None else np.nan)
+                    except (ValueError, TypeError):
+                        res_time.append(np.nan)
+                        res_disp.append(np.nan)
+                
+                res_time_arr = np.array(res_time)
+                res_disp_arr = np.array(res_disp)
+                
+                time_mask = ~np.isnan(res_time_arr)
+                disp_mask = ~np.isnan(res_disp_arr)
+                
+                res_time_clean = res_time_arr[time_mask]
+                res_disp_clean = res_disp_arr[disp_mask]
+                
+                n_res = min(len(res_time_clean), len(res_disp_clean))
+                if n_res > 0:
+                    self.result_df = pd.DataFrame({
+                        "Время, мсек": res_time_clean[:n_res],
+                        "Перемещение, мм": res_disp_clean[:n_res]
+                    })
+                
+                # Результаты по каналам (слоям) из остальных колонок
+                if headers and len(headers) > 2:
+                    self.result_channels = {}
+                    for col_idx in range(2, len(headers)):
+                        ch_name = headers[col_idx] if col_idx < len(headers) else None
+                        if not ch_name:
+                            continue
+                        
+                        ch_vals = []
+                        for row in data_rows:
+                            if row and len(row) > col_idx and row[col_idx] is not None:
+                                try:
+                                    ch_vals.append(float(row[col_idx]))
+                                except (ValueError, TypeError):
+                                    ch_vals.append(np.nan)
+                        
+                        ch_array = np.array(ch_vals)
+                        ch_mask = ~np.isnan(ch_array)
+                        ch_clean = ch_array[ch_mask]
+                        
+                        if len(ch_clean) > 0:
+                            self.result_channels[ch_name] = np.round(ch_clean, 3)
+        
+        wb.close()
+        
+        # Вычисляем автоматические диапазоны для каждого слоя
+        self._per_layer_auto_range = {}
+        temp_xlsx_loader = XLSXLoader()
+        for layer_name, calib_data in self.per_layer_calib.items():
+            if calib_data.get("disp") is not None and len(calib_data["disp"]) > 0:
+                auto_left, auto_right = temp_xlsx_loader._find_layer_overlap_static(
+                    calib_data["disp"], calib_data.get("tug", {})
+                )
+                self._per_layer_auto_range[layer_name] = (auto_left, auto_right)
+        
+        return self.source_data, self.per_layer_calib
     
     def _load_new_format_excel(self, all_data, path, sheet_names=None):
         """Загрузка нового формата с листом 'Исходные данные'."""
