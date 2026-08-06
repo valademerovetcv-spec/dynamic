@@ -3375,10 +3375,19 @@ class DinamikaApp:
                     disp_vals = calib_data.get("disp", [])
                     tug_data = calib_data.get("tug", {})
                     
-                    n_disp = len(disp_vals) if disp_vals is not None else 0
+                    # Проверка на numpy массив или список
+                    if hasattr(disp_vals, '__len__') and not isinstance(disp_vals, (str, bytes)):
+                        n_disp = len(disp_vals)
+                    else:
+                        n_disp = 0
                     
                     for sensor_name, sensor_data in tug_data.items():
-                        n_sensor = len(sensor_data) if sensor_data is not None else 0
+                        # Проверка на numpy массив или список
+                        if hasattr(sensor_data, '__len__') and not isinstance(sensor_data, (str, bytes)):
+                            n_sensor = len(sensor_data)
+                        else:
+                            n_sensor = 0
+                        
                         n = min(n_disp, n_sensor)
                         
                         for i in range(n):
