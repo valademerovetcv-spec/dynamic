@@ -3276,19 +3276,27 @@ class DinamikaApp:
         self.temp_stats_text.insert(tk.END, "\n".join(lines))
 
     def save_file(self):
-        if self.loader.result_df is None or self.loader.result_df.empty:
-            messagebox.showwarning("Внимание", "Нет данных для сохранения. Сначала выполните расчёт.")
+        """Сохраняет все данные проекта в один Excel-файл с двумя листами:
+        - 'Входные данные': все тарировки, динамика, температуры
+        - 'Результаты расчета': рассчитанные перемещения
+        """
+        # Проверяем наличие данных для сохранения
+        has_dynamics = (self.loader.dynamics_time is not None and 
+                       (self.loader.dynamics_channels or self.loader.source_data is not None))
+        
+        if not has_dynamics:
+            messagebox.showwarning("Внимание", "Нет данных для сохранения. Загрузите файлы.")
             return
 
         ts = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
         if self._file_path:
             stem = self._file_path.stem
         else:
-            stem = "Результат"
-        default_name = f"{stem}_результат_{ts}.xlsx"
+            stem = "Проект"
+        default_name = f"{stem}_полный_{ts}.xlsx"
 
         path = filedialog.asksaveasfilename(
-            title="Сохранить результат",
+            title="Сохранить проект",
             defaultextension=".xlsx",
             filetypes=[("Excel файлы", "*.xlsx")],
             initialfile=default_name
@@ -3297,145 +3305,149 @@ class DinamikaApp:
             return
 
         try:
-            self.status_var.set("Сохранение...")
+            self.status_var.set("Сохранение проекта...")
             self.root.update_idletasks()
 
             wb_out = openpyxl.Workbook()
-            ws = wb_out.active
-            ws.title = "Данные"
             
-            # === Формат совместимый с load_excel ===
-            # Структура: Динамика | Тарировка | Результат
-            # Строка 1: Заголовок секции динамики | ... | Заголовок секции тарировки | ... | Заголовок секции результата
-            # Строка 2: Время, мсек | Каналы динамики | Перемещение, мм | Каналы тарировки | Время, мсек | Каналы результата
+            # === Лист 1: Входные данные ===
+            ws_input = wb_out.active
+            ws_input.title = "Входные данные"
             
-            col = 1
+            row = 1
             
-            # === Секция Динамика ===
-            ws.cell(row=1, column=col, value="Динамика в тугриках")
-            ws.cell(row=2, column=col, value="Время, мсек")
-            dyn_start_col = col
-            col += 1
+            # --- Секция: Все тарировки ---
+            ws_input.cell(row=row, column=1, value="=== ТАРИРОВКИ ===")
+            row += 1
+            
+            # Собираем все тарировки: и общую, и по слоям
+            all_calib_data = {}
+            
+            # Добавляем общую тарировку если есть
+            if self.loader.calib_data is not None and not self.loader.calib_data.empty:
+                all_calib_data["Общая"] = {
+                    "disp": self.loader.calib_disp,
+                    "channels": self.loader.calib_channels
+                }
+            
+            # Добавляем тарировки по слоям
+            if hasattr(self.loader, 'per_layer_calib') and self.loader.per_layer_calib:
+                for layer_name, calib_info in self.loader.per_layer_calib.items():
+                    all_calib_data[layer_name] = {
+                        "disp": calib_info.get("disp", []),
+                        "channels": {sensor: vals for sensor, vals in calib_info.get("tug", {}).items()}
+                    }
+            
+            # Записываем все тарировки
+            for layer_name, calib_info in all_calib_data.items():
+                ws_input.cell(row=row, column=1, value=f"Слой: {layer_name}")
+                row += 1
+                
+                disp_data = calib_info.get("disp", [])
+                channels = calib_info.get("channels", {})
+                
+                # Заголовок таблицы тарировки
+                headers = ["Перемещение, мм"] + list(channels.keys())
+                for col_idx, header in enumerate(headers, 1):
+                    ws_input.cell(row=row, column=col_idx, value=header)
+                row += 1
+                
+                # Данные тарировки
+                max_len = max(len(disp_data), max((len(v) for v in channels.values()), default=0))
+                for i in range(max_len):
+                    ws_input.cell(row=row, column=1, value=disp_data[i] if i < len(disp_data) else None)
+                    for col_idx, (sensor_name, sensor_vals) in enumerate(channels.items(), 2):
+                        ws_input.cell(row=row, column=col_idx, value=sensor_vals[i] if i < len(sensor_vals) else None)
+                    row += 1
+                
+                row += 1  # Пустая строка между слоями
+            
+            # --- Секция: Динамика ---
+            ws_input.cell(row=row, column=1, value="=== ДИНАМИКА (тугрики) ===")
+            row += 1
             
             if self.loader.dynamics_channels:
-                for ch_name, ch_data in self.loader.dynamics_channels.items():
-                    ws.cell(row=2, column=col, value=ch_name)
-                    for i, val in enumerate(ch_data):
-                        if i < len(self.loader.dynamics_time):
-                            ws.cell(row=i + 3, column=dyn_start_col, value=self.loader.dynamics_time[i])
-                        ws.cell(row=i + 3, column=col, value=val)
-                    col += 1
+                headers = ["Время, мсек"] + list(self.loader.dynamics_channels.keys())
+                for col_idx, header in enumerate(headers, 1):
+                    ws_input.cell(row=row, column=col_idx, value=header)
+                row += 1
+                
+                for i, time_val in enumerate(self.loader.dynamics_time):
+                    ws_input.cell(row=row, column=1, value=time_val)
+                    for col_idx, (ch_name, ch_data) in enumerate(self.loader.dynamics_channels.items(), 2):
+                        ws_input.cell(row=row, column=col_idx, value=ch_data[i] if i < len(ch_data) else None)
+                    row += 1
             elif self.loader.source_data is not None:
-                ws.cell(row=2, column=col, value="Слои")
-                for i, (_, row) in enumerate(self.loader.source_data.iterrows()):
-                    ws.cell(row=i + 3, column=dyn_start_col, value=row.iloc[0])
-                    ws.cell(row=i + 3, column=col, value=row.iloc[1])
-                col += 1
+                headers = list(self.loader.source_data.columns)
+                for col_idx, header in enumerate(headers, 1):
+                    ws_input.cell(row=row, column=col_idx, value=header)
+                row += 1
+                for _, row_data in self.loader.source_data.iterrows():
+                    for col_idx, val in enumerate(row_data, 1):
+                        ws_input.cell(row=row, column=col_idx, value=val)
+                    row += 1
             
-            dyn_end_col = col - 1
+            row += 1
             
-            # === Секция Тарировка (общая + по слоям) ===
-            calib_start_col = col
-            ws.cell(row=1, column=calib_start_col, value="Тарировка")
-            
-            cal_disp_name = "Перемещение, мм"
-            if self.loader.calib_data is not None and not self.loader.calib_data.empty:
-                cal_cols = list(self.loader.calib_data.columns)
-                cal_disp_name = cal_cols[0]
-            
-            ws.cell(row=2, column=calib_start_col, value=cal_disp_name)
-            col += 1
-            
-            # Сохраняем общую тарировку если есть
-            if self.loader.calib_data is not None:
-                for i, (_, row) in enumerate(self.loader.calib_data.iterrows()):
-                    ws.cell(row=i + 3, column=calib_start_col, value=row[cal_disp_name])
-            
-            if self.loader.calib_channels:
-                for ch_name, ch_data in self.loader.calib_channels.items():
-                    ws.cell(row=2, column=col, value=ch_name)
-                    for i, val in enumerate(ch_data):
-                        ws.cell(row=i + 3, column=col, value=val)
-                    col += 1
-            elif self.loader.calib_data is not None and len(cal_cols) > 1:
-                cal_val_name = cal_cols[1]
-                ws.cell(row=2, column=col, value=cal_val_name)
-                for i, (_, row) in enumerate(self.loader.calib_data.iterrows()):
-                    ws.cell(row=i + 3, column=col, value=row[cal_val_name])
-                col += 1
-            
-            # Сохраняем тарировку по слоям (per_layer_calib)
-            if hasattr(self.loader, 'per_layer_calib') and self.loader.per_layer_calib:
-                # Добавляем лист для тарировки по слоям
-                ws_layers = wb_out.create_sheet(title="Тарировка по слоям")
-                ws_layers.cell(row=1, column=1, value="Слой")
-                ws_layers.cell(row=1, column=2, value="Перемещение, мм")
-                
-                current_row = 2
-                current_col = 2  # Колонка B для перемещения
-                
-                for layer_name, calib_data in self.loader.per_layer_calib.items():
-                    # Записываем имя слоя
-                    ws_layers.cell(row=current_row, column=1, value=layer_name)
-                    
-                    # Получаем данные перемещения
-                    disp_data = calib_data.get("disp", [])
-                    tug_data = calib_data.get("tug", {})
-                    
-                    # Записываем перемещение
-                    for i, disp_val in enumerate(disp_data):
-                        ws_layers.cell(row=current_row + i, column=current_col, value=disp_val)
-                    
-                    # Записываем каждый датчик тарировки для этого слоя
-                    for sensor_name, sensor_vals in tug_data.items():
-                        ws_layers.cell(row=current_row - 1, column=current_col + 1, value=sensor_name)
-                        for i, val in enumerate(sensor_vals):
-                            ws_layers.cell(row=current_row + i, column=current_col + 1, value=val)
-                        current_col += 1
-                    
-                    # Переходим к следующему слою с отступом
-                    current_row += len(disp_data) + 2
-                    current_col = 2  # Сбрасываем колонку для следующего слоя
-            
-            calib_end_col = col - 1
-            
-            # === Секция Результат ===
-            if self.loader.result_df is not None and not self.loader.result_df.empty:
-                res_start_col = col
-                ws.cell(row=1, column=res_start_col, value="Динамика в мм")
-                ws.cell(row=2, column=res_start_col, value="Время, мсек")
-                col += 1
-                
-                if self.loader.result_channels:
-                    for ch_name, ch_data in self.loader.result_channels.items():
-                        ws.cell(row=2, column=col, value=ch_name)
-                        for i, val in enumerate(ch_data):
-                            if i < len(self.loader.result_df):
-                                ws.cell(row=i + 3, column=res_start_col, value=self.loader.result_df.iloc[i, 0])
-                            ws.cell(row=i + 3, column=col, value=val)
-                        col += 1
-                else:
-                    ws.cell(row=2, column=col, value="Перемещение, мм")
-                    for i, (_, row) in enumerate(self.loader.result_df.iterrows()):
-                        ws.cell(row=i + 3, column=res_start_col, value=row["Время, мсек"])
-                        ws.cell(row=i + 3, column=col, value=row["Перемещение, мм"])
-                    col += 1
-            
-            # === Лист Температуры (если есть) ===
+            # --- Секция: Температуры ---
             if hasattr(self.loader, 'temp_data') and self.loader.temp_data is not None and not self.loader.temp_data.empty:
-                ws_temp = wb_out.create_sheet(title="Температуры")
-                for col_idx, col_name in enumerate(self.loader.temp_data.columns, 1):
-                    ws_temp.cell(row=1, column=col_idx, value=col_name)
-                    for row_idx, val in enumerate(self.loader.temp_data[col_name], 2):
-                        ws_temp.cell(row=row_idx, column=col_idx, value=val)
-
-            # Set column widths
-            for c in range(1, col + 1):
-                ws.column_dimensions[openpyxl.utils.get_column_letter(c)].width = 14
+                ws_input.cell(row=row, column=1, value="=== ТЕМПЕРАТУРЫ ===")
+                row += 1
+                
+                headers = ["Дата/Время"] + list(self.loader.temp_data.columns)
+                for col_idx, header in enumerate(headers, 1):
+                    ws_input.cell(row=row, column=col_idx, value=header)
+                row += 1
+                
+                time_data = self.loader.temp_time if hasattr(self.loader, 'temp_time') and self.loader.temp_time else []
+                max_temp_rows = max(len(time_data), max((len(self.loader.temp_data[col]) for col in self.loader.temp_data.columns), default=0))
+                
+                for i in range(max_temp_rows):
+                    ws_input.cell(row=row, column=1, value=time_data[i] if i < len(time_data) else None)
+                    for col_idx, col_name in enumerate(self.loader.temp_data.columns, 2):
+                        ws_input.cell(row=row, column=col_idx, value=self.loader.temp_data[col_name].iloc[i] if i < len(self.loader.temp_data[col_name]) else None)
+                    row += 1
+            
+            # === Лист 2: Результаты расчета ===
+            ws_result = wb_out.create_sheet(title="Результаты расчета")
+            
+            if self.loader.result_df is not None and not self.loader.result_df.empty:
+                # Заголовки
+                headers = ["Время, мсек", "Перемещение, мм"]
+                if self.loader.result_channels:
+                    headers.extend(list(self.loader.result_channels.keys()))
+                
+                for col_idx, header in enumerate(headers, 1):
+                    ws_result.cell(row=1, column=col_idx, value=header)
+                
+                # Данные
+                result_len = len(self.loader.result_df)
+                for i in range(result_len):
+                    ws_result.cell(row=i+2, column=1, value=self.loader.result_df.iloc[i]["Время, мсек"])
+                    ws_result.cell(row=i+2, column=2, value=self.loader.result_df.iloc[i]["Перемещение, мм"])
+                    
+                    if self.loader.result_channels:
+                        for col_idx, (ch_name, ch_data) in enumerate(self.loader.result_channels.items(), 3):
+                            ws_result.cell(row=i+2, column=col_idx, value=ch_data[i] if i < len(ch_data) else None)
+            
+            # Настройка ширины колонок
+            for ws in [ws_input, ws_result]:
+                for col in ws.columns:
+                    max_length = 0
+                    column = col[0].column_letter
+                    for cell in col:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = min(max_length + 2, 50)
+                    ws.column_dimensions[column].width = adjusted_width
 
             wb_out.save(path)
             wb_out.close()
             self.status_var.set(f"Сохранено: {Path(path).name}")
+            messagebox.showinfo("Сохранение", f"Проект сохранён в файл:\n{path}")
         except Exception as e:
             messagebox.showerror("Ошибка сохранения", str(e))
             self.status_var.set("Ошибка сохранения")
