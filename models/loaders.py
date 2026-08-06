@@ -68,11 +68,14 @@ class ExcelLoader:
         dyn_section = 0
         calib_section = None
         
-        # Ищем начало секции тарировки по слоям - ищем "Тарировка" или первый "Слой:"
+        # Ищем начало секции тарировки по слоям - ищем первый "Слой:" в row1
+        # Под заголовком "Слой:" в row1 должна быть колонка с "Перемещение" в row2
         for c, name in enumerate(row1):
-            if name and ("Тарировка" in str(name) or "Слой:" in str(name)):
-                calib_section = c
-                break
+            if name and "Слой:" in str(name):
+                # Проверяем что под этим заголовком есть "Перемещение" во второй строке
+                if c < len(row2) and row2[c] and "Перемещение" in str(row2[c]):
+                    calib_section = c
+                    break
         
         if calib_section is None:
             calib_section = max_col
@@ -366,13 +369,13 @@ class ExcelLoader:
         else:
             self.source_data = None
 
-        # Калибровочные данные
+        # Калибровочные данные - старый формат (один слой)
         if cal_section + 1 < max_col:
             cal_disp_raw = data_values[:, cal_section]
             cal_disp_mask = ~np.isnan(cal_disp_raw)
             cal_disp = cal_disp_raw[cal_disp_mask]
             nc = len(cal_disp)
-            cal_disp_name = row2[cal_section + 1] if cal_section + 1 < len(row2) else "Перемещение, мм"
+            cal_disp_name = row2[cal_section] if cal_section < len(row2) else "Перемещение, мм"
             
             end_cal = res_section if res_section else max_col
             cal_channels = {}
@@ -380,6 +383,8 @@ class ExcelLoader:
                 ch_name = row2[c] if c < len(row2) else None
                 if not ch_name:
                     continue
+                if "Слой:" in str(ch_name):
+                    break
                 ch_raw = data_values[:, c]
                 ch_mask = ~np.isnan(ch_raw)
                 ch_vals = ch_raw[ch_mask]
@@ -391,6 +396,13 @@ class ExcelLoader:
             
             self.calib_disp = cal_disp[:nc] if nc > 0 else None
             self.calib_channels = cal_channels if cal_channels else None
+            
+            # Заполняем per_layer_calib для старого формата (один слой "Слой 1")
+            if self.calib_disp is not None and len(self.calib_disp) > 0:
+                self.per_layer_calib["Слой 1"] = {
+                    "disp": np.round(self.calib_disp, 3),
+                    "tug": cal_channels
+                }
             
             if self.calib_disp is not None and self.calib_channels:
                 first_key = list(self.calib_channels.keys())[0]
