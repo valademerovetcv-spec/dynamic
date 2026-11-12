@@ -128,7 +128,15 @@ class DinamikaApp:
         self._calculating = False
         self._deformation_zones = []
         self._current_deformation_zone = 0
-        
+
+        # Переменные для выбора диапазона тренда
+        self._trend_selection_active = False
+        self._trend_selection_zone_idx = None
+        self._trend_selection_start = None
+        self._trend_selection_rect = None
+        self._trend_press_id = None
+        self._trend_release_id = None
+
         # Хранилище для toast-уведомлений
         self._toasts = []
         self._toast_counter = 0
@@ -2377,6 +2385,25 @@ class DinamikaApp:
             "layers": layer_labels
         }
         
+        # Кнопка для построения статического графика тренда
+        trend_btn_frame = ttk.Frame(frame)
+        trend_btn_frame.pack(fill=tk.X, padx=4, pady=(4, 0))
+
+        trend_btn = ttk.Button(trend_btn_frame, text="📊 Построить график тренда (весь участок)",
+                              style="Toolbar.TButton",
+                              command=lambda zidx=zone_idx: self._build_trend_chart(zidx, None))
+        trend_btn.pack(side=tk.LEFT, padx=4, pady=2)
+
+        trend_select_btn = ttk.Button(trend_btn_frame, text="🖱 Выбрать диапазон для тренда",
+                                     style="ToolbarCsv.TButton",
+                                     command=lambda zidx=zone_idx: self._start_trend_selection(zidx))
+        trend_select_btn.pack(side=tk.LEFT, padx=4, pady=2)
+
+        trend_info = ttk.Label(trend_btn_frame,
+                              text="График тренда: |Слой 1| + Слой 6 (скользящее среднее за 2 периода)",
+                              font=("Segoe UI", 9), foreground="#64748b")
+        trend_info.pack(side=tk.LEFT, padx=10)
+
         # Панель с пиковыми значениями и расчётом скорости
         peak_frame = ttk.LabelFrame(frame, text=" Пиковые значения и скорость ")
         peak_frame.pack(fill=tk.X, padx=4, pady=4)
@@ -2581,33 +2608,482 @@ class DinamikaApp:
             axis_distance = float(self.deform_axis_distance_var.get())
         except ValueError:
             return
-        
+
         # Обновляем скорость на всех вкладках
         for tab_name, data in self._deformation_tabs.items():
             if not isinstance(data, tuple) or len(data) <= 3:
                 continue
-            
+
             tab_data = data[3]
             result = data[1]
-            
+
             # Проверяем наличие данных о пиках
             if result['first_two_peak_times'][0] is None:
                 continue
-            
+
             t1 = result['first_two_peak_times'][0]
             t2 = result['first_two_peak_times'][1]
-            
+
             if t2 is None:
                 continue
-            
+
             dt = t2 - t1  # мс
             if dt > 0:
                 calc_speed = axis_distance / (dt / 1000.0) * 3.6  # км/ч
                 speed_info = f"Δt между пиками: {dt:.1f} мс → V={calc_speed:.1f} км/ч"
-                
+
                 speed_label = tab_data.get("speed_label")
                 if speed_label:
                     speed_label.config(text=speed_info)
+
+    def _build_trend_chart(self, zone_idx, x_range=None):
+        """Построение статического графика тренда для участка деформации.
+
+        Args:
+            zone_idx: Индекс участка деформации
+            x_range: Кортеж (x_start, x_end) для ограничения диапазона, или None для всего участка
+        """
+        tab_name = f"Участок {zone_idx + 1}"
+        if tab_name not in self._deformation_tabs:
+            messagebox.showinfo("Информация", "Данные участка не найдены")
+            return
+
+        data = self._deformation_tabs[tab_name]
+        if len(data) <= 1:
+            messagebox.showinfo("Информация", "Недостаточно данных для построения тренда")
+            return
+
+        result = data[1]
+
+        # Проверяем наличие необходимых слоёв (слой 1 и слой 6)
+        n_layers = self.deformation_analyzer.n_layers
+        if n_layers < 6:
+            messagebox.showwarning("Внимание",
+                f"Недостаточно слоёв для построения тренда.\n"
+                f"Требуется минимум 6 слоёв, доступно: {n_layers}")
+            return
+
+        # Получаем данные участка
+        x = result['x']  # путь в метрах
+        defs = result['defs']  # деформации по слоям
+
+        # Если указан диапазон x_range, фильтруем данные
+        if x_range is not None:
+            x_start, x_end = x_range
+            mask = (x >= x_start) & (x <= x_end)
+            x = x[mask]
+            defs = defs[mask, :]
+
+            if len(x) == 0:
+                messagebox.showwarning("Внимание", "В выбранном диапазоне нет данных")
+                return
+
+        # Вычисляем функцию тренда: |Слой 1| + Слой 6
+        # Находим участок с наибольшим пиком только для 6 слоя
+        # Из 1 слоя берём значения в тех же точках, что и пик 6 слоя
+        # Индексы: Слой 1 = индекс 0, Слой 6 = индекс 5
+        layer1_data = defs[:, 0]  # первый слой
+        layer6_data = defs[:, 5]  # шестой слой
+
+        def find_peak_region(data):
+            """Находит участок от начала роста до окончания спада наибольшего пика."""
+            # Находим индекс максимума
+            peak_idx = np.argmax(np.abs(data))
+
+            # Ищем начало роста (движемся назад от пика)
+            start_idx = peak_idx
+            threshold = np.abs(data[peak_idx]) * 0.1  # 10% от пикового значения
+
+            for i in range(peak_idx - 1, -1, -1):
+                if np.abs(data[i]) < threshold:
+                    start_idx = i + 1
+                    break
+                start_idx = i
+
+            # Ищем окончание спада (движемся вперёд от пика)
+            end_idx = peak_idx
+            for i in range(peak_idx + 1, len(data)):
+                if np.abs(data[i]) < threshold:
+                    end_idx = i - 1
+                    break
+                end_idx = i
+
+            return start_idx, end_idx, peak_idx
+
+        # Находим участок пика только для 6 слоя
+        layer6_start, layer6_end, layer6_peak = find_peak_region(layer6_data)
+
+        # Для 1 слоя используем те же самые индексы (синхронно с 6 слоем)
+        layer1_start = layer6_start
+        layer1_end = layer6_end
+        layer1_peak = layer6_peak  # Та же точка, что и пик 6 слоя
+
+        # Используем данные только из участка пика 6 слоя
+        # Создаём массив тренда: берём значения из участка пика
+        trend_data = np.zeros_like(x)
+
+        # Для каждой точки проверяем, входит ли она в участок пика 6 слоя
+        for i in range(len(x)):
+            # Если точка в участке пика 6 слоя - берём значения обоих слоёв в этой точке
+            if layer6_start <= i <= layer6_end:
+                trend_data[i] = np.abs(layer1_data[i]) + layer6_data[i]
+
+        # Применяем скользящее среднее за 2 периода для сглаживания тренда (как в Excel)
+        # Каждая точка тренда = среднее текущей и предыдущей точки
+        window_size = 2
+
+        if len(x) >= window_size:
+            # Вычисляем скользящее среднее за 2 периода
+            trend_fit = np.zeros_like(trend_data)
+
+            # Первая точка остаётся без изменений (нет предыдущей)
+            trend_fit[0] = trend_data[0]
+
+            # Для остальных точек: среднее текущей и предыдущей
+            for i in range(1, len(trend_data)):
+                trend_fit[i] = (trend_data[i] + trend_data[i-1]) / 2.0
+        else:
+            trend_fit = trend_data
+
+        # Вычисляем коэффициент детерминации R² для оценки качества сглаживания
+        if len(trend_data[trend_data != 0]) > 0:
+            # R² только для ненулевых значений
+            mask = trend_data != 0
+            if np.sum(mask) > 1:
+                ss_res = np.sum((trend_data[mask] - trend_fit[mask]) ** 2)
+                ss_tot = np.sum((trend_data[mask] - np.mean(trend_data[mask])) ** 2)
+                r_squared = 1 - (ss_res / ss_tot) if ss_tot != 0 else 1.0
+            else:
+                r_squared = 1.0
+        else:
+            r_squared = 1.0
+
+        # Создаём новое окно для статического графика
+        trend_window = tk.Toplevel(self.root)
+        trend_window.title(f"Статический график тренда - Участок {zone_idx + 1}")
+        trend_window.geometry("900x600")
+
+        # Фрейм для графика
+        chart_frame = ttk.Frame(trend_window)
+        chart_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+
+        # Создание графика
+        fig = Figure(figsize=(9, 5), dpi=100)
+        ax = fig.add_subplot(111)
+
+        # Находим индекс пика в сглаженных данных (максимум тренда)
+        peak_idx = np.argmax(trend_fit)
+        peak_x = x[peak_idx]
+        peak_y = trend_fit[peak_idx]
+
+        # Построение только линии тренда (без точек)
+        ax.plot(x, trend_fit, '-', color='#2563eb', linewidth=2.5,
+                label=f'Скользящее среднее за 2 периода (R²={r_squared:.4f})')
+
+        # Вертикальная линия через пик
+        ax.axvline(x=peak_x, color='#dc2626', linestyle='--', linewidth=2,
+                   label=f'Пик: x={peak_x:.3f} м, y={peak_y:.3f} мм')
+
+        # Вычисляем площади слева и справа от пика
+        # Левая часть: от начала до пика
+        left_mask = x <= peak_x
+        if np.sum(left_mask) > 1:
+            x_left = x[left_mask]
+            y_left = trend_fit[left_mask]
+            # Используем трапециевидное правило для вычисления площади
+            # В новых версиях NumPy используется trapezoid вместо trapz
+            try:
+                area_left = np.trapezoid(y_left, x_left)
+            except AttributeError:
+                # Для старых версий NumPy
+                area_left = np.trapz(y_left, x_left)
+        else:
+            area_left = 0.0
+
+        # Правая часть: от пика до конца
+        right_mask = x >= peak_x
+        if np.sum(right_mask) > 1:
+            x_right = x[right_mask]
+            y_right = trend_fit[right_mask]
+            try:
+                area_right = np.trapezoid(y_right, x_right)
+            except AttributeError:
+                area_right = np.trapz(y_right, x_right)
+        else:
+            area_right = 0.0
+
+        # Закрашиваем области под кривой для наглядности
+        ax.fill_between(x[left_mask], 0, trend_fit[left_mask],
+                        alpha=0.2, color='#10b981', label=f'Площадь слева: {area_left:.4f}')
+        ax.fill_between(x[right_mask], 0, trend_fit[right_mask],
+                        alpha=0.2, color='#f59e0b', label=f'Площадь справа: {area_right:.4f}')
+
+        ax.set_xlabel("Путь, м", fontsize=11)
+        ax.set_ylabel("Тренд, мм", fontsize=11)
+        ax.set_title(f"Статический график тренда - Участок {zone_idx + 1}",
+                    fontsize=12, fontweight='bold')
+        ax.legend(loc="best", fontsize=9)
+        ax.grid(True, alpha=0.3)
+
+        # Инвертируем ось Y, чтобы график смотрел вниз
+        ax.invert_yaxis()
+
+        fig.tight_layout()
+
+        # Добавляем canvas
+        canvas = FigureCanvasTkAgg(fig, master=chart_frame)
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # Toolbar для графика
+        toolbar_frame = ttk.Frame(trend_window)
+        toolbar_frame.pack(fill=tk.X, padx=8, pady=(0, 8))
+
+        toolbar = NavigationToolbar2Tk(canvas, toolbar_frame)
+        toolbar.update()
+
+        # Панель с информацией о тренде
+        info_frame = ttk.LabelFrame(trend_window, text=" Информация о тренде ")
+        info_frame.pack(fill=tk.X, padx=8, pady=(0, 8))
+
+        # Вычисляем статистику тренда
+        trend_min = np.min(trend_fit)
+        trend_max = np.max(trend_fit)
+        trend_mean = np.mean(trend_fit)
+        trend_std = np.std(trend_fit)
+
+        # Информация о методе сглаживания
+        range_info = ""
+        if x_range is not None:
+            range_info = f"\nВыбранный диапазон: {x_range[0]:.3f} — {x_range[1]:.3f} м\n"
+
+        # Общая площадь под кривой
+        total_area = area_left + area_right
+
+        info_text = (
+            f"Метод: Скользящее среднее за 2 периода (Moving Average)\n"
+            f"Период: {window_size} точек\n{range_info}\n"
+            f"Коэффициент детерминации: R² = {r_squared:.6f}\n\n"
+            f"Пик тренда:\n"
+            f"  Координаты: x = {peak_x:.3f} м, y = {peak_y:.3f} мм\n\n"
+            f"Площади под кривой:\n"
+            f"  Слева от пика: {area_left:.6f} мм·м\n"
+            f"  Справа от пика: {area_right:.6f} мм·м\n"
+            f"  Общая площадь: {total_area:.6f} мм·м\n"
+            f"  Соотношение (Л/П): {area_left/area_right:.3f}\n\n" if area_right > 0 else f"  Общая площадь: {total_area:.6f} мм·м\n\n"
+            f"Статистика сглаженного тренда:\n"
+            f"  Минимум: {trend_min:.6f} мм\n"
+            f"  Максимум: {trend_max:.6f} мм\n"
+            f"  Среднее: {trend_mean:.6f} мм\n"
+            f"  Ст. откл.: {trend_std:.6f} мм\n\n"
+            f"Участок пика (Слой 6):\n"
+            f"  Точки: {layer6_start}-{layer6_end} (пик в {layer6_peak})\n\n"
+            f"Исходный участок: {result['x_start']:.3f} — {result['x_end']:.3f} м"
+        )
+
+        info_label = ttk.Label(info_frame, text=info_text,
+                              font=("Consolas", 9), justify=tk.LEFT)
+        info_label.pack(padx=8, pady=8)
+
+        # Кнопка закрытия
+        close_btn = ttk.Button(trend_window, text="Закрыть",
+                              command=trend_window.destroy,
+                              style="ToolbarClear.TButton")
+        close_btn.pack(pady=(0, 8))
+
+        canvas.draw()
+
+        self.status_var.set(f"Построен статический график тренда для участка {zone_idx + 1}")
+
+    def _start_trend_selection(self, zone_idx):
+        """Начало выбора диапазона для построения тренда."""
+        tab_name = f"Участок {zone_idx + 1}"
+        if tab_name not in self._deformation_tabs:
+            messagebox.showinfo("Информация", "Данные участка не найдены")
+            return
+
+        data = self._deformation_tabs[tab_name]
+        if len(data) <= 3:
+            messagebox.showinfo("Информация", "Недостаточно данных для выбора диапазона")
+            return
+
+        tab_data = data[3]
+
+        # Отключаем предыдущие обработчики выбора диапазона
+        self._disconnect_trend_selection_handlers()
+
+        # Устанавливаем флаг активного выбора
+        self._trend_selection_active = True
+        self._trend_selection_zone_idx = zone_idx
+        self._trend_selection_start = None
+        self._trend_selection_rect = None
+
+        # Подключаем обработчики событий для выбора диапазона
+        canvas = tab_data["canvas"]
+        self._trend_press_id = canvas.mpl_connect('button_press_event', self._on_trend_selection_press)
+        self._trend_release_id = canvas.mpl_connect('button_release_event', self._on_trend_selection_release)
+
+        self.status_var.set("Выберите диапазон на графике для построения тренда (кликните и перетащите)")
+
+    def _on_trend_selection_press(self, event):
+        """Обработчик нажатия мыши для выбора диапазона тренда."""
+        if not self._trend_selection_active:
+            return
+
+        zone_idx = self._trend_selection_zone_idx
+        tab_name = f"Участок {zone_idx + 1}"
+        if tab_name not in self._deformation_tabs:
+            return
+
+        data = self._deformation_tabs[tab_name]
+        if len(data) <= 3:
+            return
+
+        tab_data = data[3]
+        ax = tab_data["ax"]
+
+        if event.inaxes != ax:
+            return
+
+        self._trend_selection_start = event.xdata
+
+        # Удаляем предыдущий прямоугольник выделения
+        if self._trend_selection_rect is not None:
+            self._trend_selection_rect.remove()
+            self._trend_selection_rect = None
+            tab_data["canvas"].draw()
+
+        # Подключаем обработчик движения мыши для отображения выделения в реальном времени
+        self._trend_motion_id = tab_data["canvas"].mpl_connect('motion_notify_event', self._on_trend_selection_motion)
+
+    def _on_trend_selection_motion(self, event):
+        """Обработчик движения мыши во время выбора диапазона - показывает выделение в реальном времени."""
+        if not self._trend_selection_active or self._trend_selection_start is None:
+            return
+
+        zone_idx = self._trend_selection_zone_idx
+        tab_name = f"Участок {zone_idx + 1}"
+        if tab_name not in self._deformation_tabs:
+            return
+
+        data = self._deformation_tabs[tab_name]
+        if len(data) <= 3:
+            return
+
+        tab_data = data[3]
+        ax = tab_data["ax"]
+
+        if event.inaxes != ax or event.xdata is None:
+            return
+
+        # Удаляем предыдущий временный прямоугольник
+        if self._trend_selection_rect is not None:
+            self._trend_selection_rect.remove()
+
+        # Рисуем новый прямоугольник от начальной точки до текущей позиции курсора
+        x_start = self._trend_selection_start
+        x_end = event.xdata
+
+        self._trend_selection_rect = ax.axvspan(
+            x_start, x_end, alpha=0.3, color='#fbbf24', zorder=0)
+        tab_data["canvas"].draw_idle()
+
+    def _on_trend_selection_release(self, event):
+        """Обработчик отпускания мыши для завершения выбора диапазона тренда."""
+        if not self._trend_selection_active:
+            return
+
+        zone_idx = self._trend_selection_zone_idx
+        tab_name = f"Участок {zone_idx + 1}"
+        if tab_name not in self._deformation_tabs:
+            return
+
+        data = self._deformation_tabs[tab_name]
+        if len(data) <= 3:
+            return
+
+        tab_data = data[3]
+        ax = tab_data["ax"]
+
+        # Отключаем обработчик движения мыши
+        if hasattr(self, '_trend_motion_id') and self._trend_motion_id is not None:
+            tab_data["canvas"].mpl_disconnect(self._trend_motion_id)
+            self._trend_motion_id = None
+
+        if event.inaxes != ax or self._trend_selection_start is None:
+            # Удаляем выделение если отпустили вне графика
+            if self._trend_selection_rect is not None:
+                self._trend_selection_rect.remove()
+                self._trend_selection_rect = None
+                tab_data["canvas"].draw()
+            return
+
+        x_start = self._trend_selection_start
+        x_end = event.xdata
+
+        # Меняем местами, если выбрано справа налево
+        if x_start > x_end:
+            x_start, x_end = x_end, x_start
+
+        # Проверяем минимальную ширину диапазона
+        if abs(x_end - x_start) < 0.01:
+            self.status_var.set("Диапазон слишком мал, попробуйте снова")
+            # Удаляем выделение
+            if self._trend_selection_rect is not None:
+                self._trend_selection_rect.remove()
+                self._trend_selection_rect = None
+                tab_data["canvas"].draw()
+            return
+
+        # Обновляем прямоугольник выделения с финальными координатами
+        if self._trend_selection_rect is not None:
+            self._trend_selection_rect.remove()
+
+        self._trend_selection_rect = ax.axvspan(
+            x_start, x_end, alpha=0.3, color='#10b981', zorder=0)
+        tab_data["canvas"].draw()
+
+        # Отключаем обработчики
+        self._disconnect_trend_selection_handlers()
+        self._trend_selection_active = False
+
+        # Строим график тренда для выбранного диапазона
+        self._build_trend_chart(zone_idx, (x_start, x_end))
+
+        # Удаляем прямоугольник выделения через небольшую задержку
+        def clear_selection():
+            if self._trend_selection_rect is not None:
+                try:
+                    self._trend_selection_rect.remove()
+                    self._trend_selection_rect = None
+                    tab_data["canvas"].draw()
+                except:
+                    pass
+
+        self.root.after(500, clear_selection)
+
+        self.status_var.set(f"Построен график тренда для диапазона {x_start:.3f} — {x_end:.3f} м")
+
+    def _disconnect_trend_selection_handlers(self):
+        """Отключение обработчиков выбора диапазона для тренда."""
+        if hasattr(self, '_trend_press_id') and self._trend_press_id is not None:
+            # Находим canvas из активной вкладки
+            if hasattr(self, '_trend_selection_zone_idx'):
+                zone_idx = self._trend_selection_zone_idx
+                tab_name = f"Участок {zone_idx + 1}"
+                if tab_name in self._deformation_tabs:
+                    data = self._deformation_tabs[tab_name]
+                    if len(data) > 3:
+                        tab_data = data[3]
+                        canvas = tab_data["canvas"]
+                        try:
+                            canvas.mpl_disconnect(self._trend_press_id)
+                            canvas.mpl_disconnect(self._trend_release_id)
+                        except:
+                            pass
+            self._trend_press_id = None
+            self._trend_release_id = None
+
+        self._trend_selection_active = False
 
     # === Peak selection methods ===
 
