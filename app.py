@@ -2636,12 +2636,13 @@ class DinamikaApp:
                 if speed_label:
                     speed_label.config(text=speed_info)
 
-    def _build_trend_chart(self, zone_idx, x_range=None):
+    def _build_trend_chart(self, zone_idx, x_range=None, method="polynomial"):
         """Построение статического графика тренда для участка деформации.
 
         Args:
             zone_idx: Индекс участка деформации
             x_range: Кортеж (x_start, x_end) для ограничения диапазона, или None для всего участка
+            method: Метод сглаживания - "moving_average" или "polynomial"
         """
         tab_name = f"Участок {zone_idx + 1}"
         if tab_name not in self._deformation_tabs:
@@ -2718,32 +2719,56 @@ class DinamikaApp:
         layer1_end = layer6_end
         layer1_peak = layer6_peak  # Та же точка, что и пик 6 слоя
 
+        # Получаем деформацию первого слоя в точке пика шестого слоя
+        layer1_at_peak = layer1_data[layer6_peak]
+
         # Используем данные только из участка пика 6 слоя
         # Создаём массив тренда: берём значения из участка пика
         trend_data = np.zeros_like(x)
 
         # Для каждой точки проверяем, входит ли она в участок пика 6 слоя
         for i in range(len(x)):
-            # Если точка в участке пика 6 слоя - берём значения обоих слоёв в этой точке
+            # Если точка в участке пика 6 слоя - увеличиваем значение шестого слоя на деформацию первого слоя в точке пика
             if layer6_start <= i <= layer6_end:
-                trend_data[i] = np.abs(layer1_data[i]) + layer6_data[i]
+                trend_data[i] = layer6_data[i] + np.abs(layer1_at_peak)
 
-        # Применяем скользящее среднее за 2 периода для сглаживания тренда (как в Excel)
-        # Каждая точка тренда = среднее текущей и предыдущей точки
-        window_size = 2
+        # Применяем выбранный метод сглаживания
+        if method == "moving_average":
+            # Скользящее среднее за 2 периода
+            window_size = 2
 
-        if len(x) >= window_size:
-            # Вычисляем скользящее среднее за 2 периода
-            trend_fit = np.zeros_like(trend_data)
+            if len(x) >= window_size:
+                trend_fit = np.zeros_like(trend_data)
+                trend_fit[0] = trend_data[0]
 
-            # Первая точка остаётся без изменений (нет предыдущей)
-            trend_fit[0] = trend_data[0]
+                for i in range(1, len(trend_data)):
+                    trend_fit[i] = (trend_data[i] + trend_data[i-1]) / 2.0
+            else:
+                trend_fit = trend_data
 
-            # Для остальных точек: среднее текущей и предыдущей
-            for i in range(1, len(trend_data)):
-                trend_fit[i] = (trend_data[i] + trend_data[i-1]) / 2.0
-        else:
-            trend_fit = trend_data
+            method_name = f"Скользящее среднее за {window_size} периода"
+        else:  # polynomial
+            # Полиномиальная аппроксимация
+            # Используем только ненулевые значения для построения полинома
+            mask_nonzero = trend_data != 0
+            if np.sum(mask_nonzero) > 3:  # Минимум 4 точки для полинома 3 степени
+                x_nonzero = x[mask_nonzero]
+                y_nonzero = trend_data[mask_nonzero]
+
+                # Полином 3 степени
+                poly_degree = 3
+                coeffs = np.polyfit(x_nonzero, y_nonzero, poly_degree)
+                poly_func = np.poly1d(coeffs)
+
+                # Применяем полином ко всем точкам
+                trend_fit = np.zeros_like(trend_data)
+                trend_fit[mask_nonzero] = poly_func(x_nonzero)
+
+                method_name = f"Полином {poly_degree} степени"
+            else:
+                # Если недостаточно точек, используем скользящее среднее
+                trend_fit = trend_data.copy()
+                method_name = "Исходные данные (недостаточно точек для полинома)"
 
         # Вычисляем коэффициент детерминации R² для оценки качества сглаживания
         if len(trend_data[trend_data != 0]) > 0:
@@ -2761,11 +2786,53 @@ class DinamikaApp:
         # Создаём новое окно для статического графика
         trend_window = tk.Toplevel(self.root)
         trend_window.title(f"Статический график тренда - Участок {zone_idx + 1}")
-        trend_window.geometry("900x600")
+        trend_window.geometry("900x650")
+
+        # Панель выбора метода (сверху)
+        method_frame = ttk.Frame(trend_window)
+        method_frame.pack(fill=tk.X, padx=8, pady=(8, 4))
+
+        ttk.Label(method_frame, text="Метод сглаживания:",
+                  font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=(4, 8))
+
+        # Устанавливаем отображаемые названия
+        method_display = {
+            "polynomial": "Полином",
+            "moving_average": "Скользящая средняя"
+        }
+
+        # Обратное отображение для преобразования выбранного значения
+        method_display_reverse = {v: k for k, v in method_display.items()}
+
+        method_var = tk.StringVar(value=method)
+        method_combo = ttk.Combobox(method_frame, textvariable=method_var,
+                                     values=list(method_display.values()),
+                                     state="readonly", width=20)
+        method_combo.pack(side=tk.LEFT, padx=4)
+
+        # Инициализируем отображение
+        method_combo.set(method_display[method])
+
+        # Кнопка пересчета
+        def on_recalculate():
+            # Получаем выбранное значение ДО закрытия окна
+            selected_display = method_combo.get()
+            selected_method = method_display_reverse.get(selected_display, "polynomial")
+
+            # Закрываем окно
+            trend_window.destroy()
+
+            # Строим новый график с выбранным методом
+            self._build_trend_chart(zone_idx, x_range, selected_method)
+
+        recalc_btn = ttk.Button(method_frame, text="Пересчитать",
+                                style="Toolbar.TButton",
+                                command=on_recalculate)
+        recalc_btn.pack(side=tk.LEFT, padx=8)
 
         # Фрейм для графика
         chart_frame = ttk.Frame(trend_window)
-        chart_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+        chart_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
 
         # Создание графика
         fig = Figure(figsize=(9, 5), dpi=100)
@@ -2778,11 +2845,11 @@ class DinamikaApp:
 
         # Построение только линии тренда (без точек)
         ax.plot(x, trend_fit, '-', color='#2563eb', linewidth=2.5,
-                label=f'Скользящее среднее за 2 периода (R²={r_squared:.4f})')
+                label=f'{method_name} (R²={r_squared:.4f})')
 
         # Вертикальная линия через пик
-        ax.axvline(x=peak_x, color='#dc2626', linestyle='--', linewidth=2,
-                   label=f'Пик: x={peak_x:.3f} м, y={peak_y:.3f} мм')
+        # ax.axvline(x=peak_x, color='#dc2626', linestyle='--', linewidth=2,
+        #            label=f'Пик: x={peak_x:.3f} м, y={peak_y:.3f} мм')
 
         # Вычисляем площади слева и справа от пика
         # Левая часть: от начала до пика
@@ -2860,8 +2927,7 @@ class DinamikaApp:
         total_area = area_left + area_right
 
         info_text = (
-            f"Метод: Скользящее среднее за 2 периода (Moving Average)\n"
-            f"Период: {window_size} точек\n{range_info}\n"
+            f"Метод: {method_name}\n"
             f"Коэффициент детерминации: R² = {r_squared:.6f}\n\n"
             f"Пик тренда:\n"
             f"  Координаты: x = {peak_x:.3f} м, y = {peak_y:.3f} мм\n\n"
