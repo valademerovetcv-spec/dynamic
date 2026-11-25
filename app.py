@@ -36,6 +36,37 @@ CHART_BG = "#fafbfc"
 CHANNEL_COLORS = ["#4CAF50", "#2196F3", "#FF9800", "#E91E63", "#9C27B0", "#00BCD4", "#FF5722"]
 
 
+def _get_layer_color(layer_name, all_layer_names):
+    """Получить цвет для слоя по его имени, сохраняя порядок."""
+    try:
+        # Извлекаем номер слоя из имени (например "Слой 1" -> 1, "Слой:1" -> 1)
+        import re
+        match = re.search(r'(\d+)', layer_name)
+        if match:
+            layer_num = int(match.group(1))
+            # Индекс начинается с 0
+            return CHANNEL_COLORS[(layer_num - 1) % len(CHANNEL_COLORS)]
+    except:
+        pass
+    
+    # Fallback: используем позицию в списке
+    if layer_name in all_layer_names:
+        idx = list(all_layer_names).index(layer_name)
+        return CHANNEL_COLORS[idx % len(CHANNEL_COLORS)]
+    
+    return CHANNEL_COLORS[0]
+
+
+def _sort_layer_names(layer_names):
+    """Сортировать имена слоёв в естественном порядке (Слой 1, Слой 2, ...)."""
+    import re
+    def layer_key(name):
+        match = re.search(r'(\d+)', name)
+        return int(match.group(1)) if match else 0
+    return sorted(layer_names, key=layer_key)
+
+
+
 def _style_app():
     style = ttk.Style()
     style.theme_use("clam")
@@ -136,6 +167,18 @@ class DinamikaApp:
         self._trend_selection_rect = None
         self._trend_press_id = None
         self._trend_release_id = None
+
+        # Переменные для привязок слоёв к тарировкам
+        self.layer_calibration_mapping = {}  # {layer_name: calibration_file_path}
+        self.mapping_widgets = {}  # {layer_name: (label, file_label, button)}
+
+        # Переменные для выбора участка вручную
+        self._manual_zone_selection_active = False
+        self._manual_zone_selection_start = None
+        self._manual_zone_selection_rect = None
+        self._manual_zone_press_id = None
+        self._manual_zone_release_id = None
+        self._manual_zone_motion_id = None
 
         # Хранилище для toast-уведомлений
         self._toasts = []
@@ -287,6 +330,7 @@ class DinamikaApp:
         file_menu.add_command(label="Загрузить Динамика (XLSX)...", command=self.load_dynamics_xlsx)
         file_menu.add_command(label="Загрузить Тарировка (CSV)...", command=self.load_calibration_csv)
         file_menu.add_command(label="Загрузить Тарировка (XLSX)...", command=self.load_calibration_xlsx)
+        file_menu.add_command(label="Загрузить папку с тарировками...", command=self.load_calibration_folder)
         file_menu.add_separator()
         file_menu.add_command(label="Загрузить Температуры (CSV)...", command=self.load_temperature)
         file_menu.add_separator()
@@ -310,6 +354,8 @@ class DinamikaApp:
                    command=self.load_dynamics_csv).pack(side=tk.LEFT, padx=3, pady=6)
         ttk.Button(tb, text="Тарировка (CSV/XLSX)", style="ToolbarCsv.TButton",
                    command=self.load_calibration_csv).pack(side=tk.LEFT, padx=3, pady=6)
+        ttk.Button(tb, text="📁 Папка тарировок", style="ToolbarCsv.TButton",
+                   command=self.load_calibration_folder).pack(side=tk.LEFT, padx=3, pady=6)
         ttk.Button(tb, text="Сохранить", style="Toolbar.TButton",
                    command=self.save_file).pack(side=tk.LEFT, padx=3, pady=6)
 
@@ -368,6 +414,30 @@ class DinamikaApp:
         self.source_notebook.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
         self._source_tabs = {}
         self.source_notebook.bind("<<NotebookTabChanged>>", self._on_source_tab_changed)
+
+        # Панель управления привязками слоёв к тарировкам
+        mapping_frame = ttk.LabelFrame(top_paned, text=" Привязка слоёв к тарировкам ")
+        top_paned.add(mapping_frame, weight=1)
+        
+        # Скроллируемый фрейм для списка привязок
+        mapping_canvas = tk.Canvas(mapping_frame, height=200)
+        mapping_scrollbar = ttk.Scrollbar(mapping_frame, orient="vertical", command=mapping_canvas.yview)
+        self.mapping_content = ttk.Frame(mapping_canvas)
+        
+        self.mapping_content.bind(
+            "<Configure>",
+            lambda e: mapping_canvas.configure(scrollregion=mapping_canvas.bbox("all"))
+        )
+        
+        mapping_canvas.create_window((0, 0), window=self.mapping_content, anchor="nw")
+        mapping_canvas.configure(yscrollcommand=mapping_scrollbar.set)
+        
+        mapping_canvas.pack(side="left", fill="both", expand=True, padx=4, pady=4)
+        mapping_scrollbar.pack(side="right", fill="y")
+        
+        # Словарь для хранения привязок слой -> файл тарировки
+        self.layer_calibration_mapping = {}
+        self.mapping_widgets = {}
 
         right_frame = ttk.LabelFrame(top_paned, text=" Тарировка — Калибровочная кривая (Drop CSV/XLSX)")
         top_paned.add(right_frame, weight=2)
@@ -523,10 +593,10 @@ class DinamikaApp:
         self.deform_speed_entry = ttk.Entry(deform_ctrl_frame, textvariable=self.deform_speed_var, width=8)
         self.deform_speed_entry.pack(side=tk.LEFT)
         
-        ttk.Label(deform_ctrl_frame, text="Порог, σ:").pack(side=tk.LEFT, padx=(15, 5))
+        # ttk.Label(deform_ctrl_frame, text="Порог, σ:").pack(side=tk.LEFT, padx=(15, 5))
         self.deform_threshold_var = tk.StringVar(value=str(THRESHOLD_SIGMA_DEFAULT))
         self.deform_threshold_entry = ttk.Entry(deform_ctrl_frame, textvariable=self.deform_threshold_var, width=8)
-        self.deform_threshold_entry.pack(side=tk.LEFT)
+        # self.deform_threshold_entry.pack(side=tk.LEFT)
         
         ttk.Label(deform_ctrl_frame, text="Расстояние между осями, м:").pack(side=tk.LEFT, padx=(15, 5))
         self.deform_axis_distance_var = tk.StringVar(value="2.5")
@@ -761,11 +831,13 @@ class DinamikaApp:
                   font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=(4, 4))
 
         self._channel_vars = {}
-        for i, ch_name in enumerate(self.loader.dynamics_channels.keys()):
+        # Сортируем слои по порядку
+        sorted_layers = _sort_layer_names(list(self.loader.dynamics_channels.keys()))
+        for ch_name in sorted_layers:
             is_zero = np.all(self.loader.dynamics_channels[ch_name] == 0)
             var = tk.BooleanVar(value=not is_zero)
             self._channel_vars[ch_name] = var
-            color = CHANNEL_COLORS[i % len(CHANNEL_COLORS)]
+            color = _get_layer_color(ch_name, sorted_layers)
             cb = tk.Checkbutton(self.channel_toggle_frame, text=ch_name, variable=var,
                                 bg=BG, fg=color, selectcolor=BG,
                                 activebackground=BG, activeforeground=color,
@@ -782,10 +854,12 @@ class DinamikaApp:
                       font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=(4, 4))
 
             self._result_vars = {}
-            for i, ch_name in enumerate(self.loader.result_channels.keys()):
+            # Сортируем слои по порядку
+            sorted_result_layers = _sort_layer_names(list(self.loader.result_channels.keys()))
+            for ch_name in sorted_result_layers:
                 var = tk.BooleanVar(value=True)
                 self._result_vars[ch_name] = var
-                color = CHANNEL_COLORS[i % len(CHANNEL_COLORS)]
+                color = _get_layer_color(ch_name, sorted_result_layers)
                 cb = tk.Checkbutton(self.result_toggle_frame, text=ch_name, variable=var,
                                     bg=BG, fg=color, selectcolor=BG,
                                     activebackground=BG, activeforeground=color,
@@ -1126,6 +1200,151 @@ class DinamikaApp:
             messagebox.showerror("Ошибка загрузки", str(e))
             self.status_var.set("Ошибка загрузки")
 
+    def load_calibration_folder(self):
+        """Загрузка папки с файлами тарировок."""
+        if not self.loader.dynamics_channels:
+            messagebox.showwarning("Внимание", "Сначала загрузите файл Динамики.")
+            return
+        
+        folder_path = filedialog.askdirectory(title="Выберите папку с файлами тарировок")
+        if not folder_path:
+            return
+        
+        try:
+            self.status_var.set("Загрузка тарировок из папки...")
+            
+            # Получаем все CSV и XLSX файлы из папки
+            folder = Path(folder_path)
+            calib_files = sorted(list(folder.glob("*.csv")) + list(folder.glob("*.xlsx")))
+            
+            if not calib_files:
+                messagebox.showwarning("Внимание", "В выбранной папке нет CSV или XLSX файлов.")
+                return
+            
+            # Получаем список слоёв
+            layer_names = list(self.loader.dynamics_channels.keys())
+            n_layers = len(layer_names)
+            n_files = len(calib_files)
+            
+            # Очищаем предыдущие привязки
+            self.layer_calibration_mapping = {}
+            self.loader.per_layer_calib = {}
+            
+            # Привязываем файлы к слоям
+            for i, layer_name in enumerate(layer_names):
+                # Если файлов меньше чем слоёв, используем последний файл для остальных
+                file_index = min(i, n_files - 1)
+                calib_file = calib_files[file_index]
+                
+                # Загружаем тарировку для слоя
+                self.loader.load_calibration_for_layer(str(calib_file), layer_name)
+                self.layer_calibration_mapping[layer_name] = str(calib_file)
+            
+            # Обновляем панель привязок
+            self._update_mapping_panel()
+            
+            # Пересчитываем все слои
+            self.root.after(0, lambda: self._finalize_folder_calibration_load(folder, n_files, n_layers))
+            
+        except Exception as e:
+            messagebox.showerror("Ошибка загрузки", str(e))
+            self.status_var.set("Ошибка загрузки")
+    
+    def _finalize_folder_calibration_load(self, folder, n_files, n_layers):
+        """Финализация загрузки папки с тарировками."""
+        try:
+            self._update_calib_notebook_for_layer()
+            
+            self.status_var.set(f"Загружено {n_files} файлов тарировок для {n_layers} слоёв из {folder.name}")
+            
+            if self._dynamics_file_path:
+                self.file_label.configure(
+                    text=f"Динамика: {self._dynamics_file_path.name}  |  Тарировки: {folder.name} ({n_files} файлов)")
+            else:
+                self.file_label.configure(text=f"Тарировки: {folder.name} ({n_files} файлов)")
+            
+            # Пересчитываем все слои
+            self.calculate()
+            
+        except Exception as e:
+            messagebox.showerror("Ошибка загрузки", str(e))
+            self.status_var.set("Ошибка загрузки")
+    
+    def _update_mapping_panel(self):
+        """Обновление панели привязок слоёв к тарировкам."""
+        # Очищаем предыдущие виджеты
+        for widget in self.mapping_content.winfo_children():
+            widget.destroy()
+        self.mapping_widgets = {}
+        
+        if not self.layer_calibration_mapping:
+            ttk.Label(self.mapping_content, text="Привязки не заданы",
+                     font=("Segoe UI", 9, "italic")).pack(padx=8, pady=8)
+            return
+        
+        # Заголовок
+        header_frame = ttk.Frame(self.mapping_content)
+        header_frame.pack(fill=tk.X, padx=4, pady=(4, 2))
+        
+        ttk.Label(header_frame, text="Слой", font=("Segoe UI", 9, "bold"),
+                 width=15).pack(side=tk.LEFT, padx=2)
+        ttk.Label(header_frame, text="Файл тарировки", font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=2)
+        
+        # Список привязок
+        for layer_name, calib_file in self.layer_calibration_mapping.items():
+            row_frame = ttk.Frame(self.mapping_content)
+            row_frame.pack(fill=tk.X, padx=4, pady=1)
+            
+            # Имя слоя
+            layer_label = ttk.Label(row_frame, text=layer_name, width=15)
+            layer_label.pack(side=tk.LEFT, padx=2)
+            
+            # Имя файла (только имя, без пути)
+            file_name = Path(calib_file).name
+            file_label = ttk.Label(row_frame, text=file_name, font=("Segoe UI", 8))
+            file_label.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+            
+            # Кнопка изменения
+            change_btn = ttk.Button(row_frame, text="Изменить", 
+                                   command=lambda ln=layer_name: self._change_layer_calibration(ln),
+                                   style="Toolbar.TButton")
+            change_btn.pack(side=tk.RIGHT, padx=2)
+            
+            self.mapping_widgets[layer_name] = (layer_label, file_label, change_btn)
+    
+    def _change_layer_calibration(self, layer_name):
+        """Изменение файла тарировки для конкретного слоя."""
+        path = filedialog.askopenfilename(
+            title=f"Выберите файл тарировки для {layer_name}",
+            filetypes=[("Все файлы", "*.csv *.xlsx"), ("CSV файлы", "*.csv"), ("Excel файлы", "*.xlsx")]
+        )
+        if not path:
+            return
+        
+        try:
+            self.status_var.set(f"Загрузка тарировки для {layer_name}...")
+            
+            # Загружаем новую тарировку
+            self.loader.load_calibration_for_layer(path, layer_name)
+            self.layer_calibration_mapping[layer_name] = path
+            
+            # Обновляем панель привязок
+            self._update_mapping_panel()
+            
+            # Пересчитываем только этот слой
+            if layer_name in self.loader.dynamics_channels:
+                self.loader.calculate_single_layer(layer_name)
+            
+            # Обновляем UI
+            self._update_calib_notebook_for_layer()
+            self.root.after(0, lambda: self._update_ui_after_layer_calc(layer_name))
+            
+            self.status_var.set(f"Тарировка для {layer_name} обновлена")
+            
+        except Exception as e:
+            messagebox.showerror("Ошибка", str(e))
+            self.status_var.set("Ошибка обновления тарировки")
+
     def load_dynamics_xlsx(self):
         path = filedialog.askopenfilename(
             title="Выберите файл Динамика (XLSX)",
@@ -1162,6 +1381,10 @@ class DinamikaApp:
             src_n = len(self.loader.source_data) if self.loader.source_data is not None else 0
             self.file_label.configure(text=f"Динамика: {self._dynamics_file_path.name}")
             self.status_var.set(f"Загружена динамика: {self._dynamics_file_path.name} ({n_ch} каналов)")
+
+            # Очищаем привязки при загрузке новой динамики
+            self.layer_calibration_mapping = {}
+            self._update_mapping_panel()
 
             # Обновляем автоматические диапазоны для пиков после загрузки динамики
             self._update_auto_peak_ranges()
@@ -1929,25 +2152,41 @@ class DinamikaApp:
         
         if hasattr(self.loader, 'result_channels_raw') and self.loader.result_channels_raw and has_time_data:
             visible_any = False
-            for i, (ch_name, ch_data) in enumerate(self.loader.result_channels_raw.items()):
+            # Сортируем слои по порядку
+            sorted_layers = _sort_layer_names(list(self.loader.result_channels_raw.keys()))
+            for ch_name in sorted_layers:
+                ch_data = self.loader.result_channels_raw[ch_name]
                 visible = True
                 if hasattr(self, '_result_vars') and ch_name in self._result_vars:
                     visible = self._result_vars[ch_name].get()
                 if visible and ch_data is not None and len(ch_data) > 0:
-                    color = CHANNEL_COLORS[i % len(CHANNEL_COLORS)]
-                    self.result_ax.plot(self.loader.dynamics_time, ch_data,
-                                        linewidth=0.6, color=color, label=ch_name, rasterized=True)
-                    visible_any = True
+                    # Проверяем на NaN и Inf
+                    valid_mask = np.isfinite(ch_data) & np.isfinite(self.loader.dynamics_time)
+                    if np.any(valid_mask):
+                        time_clean = self.loader.dynamics_time[valid_mask]
+                        data_clean = ch_data[valid_mask]
+                        color = _get_layer_color(ch_name, sorted_layers)
+                        self.result_ax.plot(time_clean, data_clean,
+                                            linewidth=0.6, color=color, label=ch_name, rasterized=True)
+                        visible_any = True
             if visible_any:
                 self.result_ax.legend(loc="upper right", fontsize=8)
             self.result_ax.set_xlabel("Время, мсек")
             self.result_ax.set_ylabel("Перемещение, мм")
         elif self.loader.result_df is not None and not self.loader.result_df.empty:
-            self.result_ax.plot(self.loader.result_df["Время, мсек"],
-                                self.loader.result_df["Перемещение, мм"],
-                                linewidth=0.6, color="#2196F3", rasterized=True)
-            self.result_ax.set_xlabel("Время, мсек")
-            self.result_ax.set_ylabel("Перемещение, мм")
+            # Проверяем на NaN и Inf
+            time_data = self.loader.result_df["Время, мсек"].values
+            disp_data = self.loader.result_df["Перемещение, мм"].values
+            valid_mask = np.isfinite(time_data) & np.isfinite(disp_data)
+            if np.any(valid_mask):
+                self.result_ax.plot(time_data[valid_mask], disp_data[valid_mask],
+                                    linewidth=0.6, color="#2196F3", rasterized=True)
+                self.result_ax.set_xlabel("Время, мсек")
+                self.result_ax.set_ylabel("Перемещение, мм")
+            else:
+                self.result_ax.text(0.5, 0.5, "Нет валидных данных (все значения NaN)",
+                                    ha="center", va="center", transform=self.result_ax.transAxes,
+                                    fontsize=12, color="#94a3b8")
         else:
             self.result_ax.text(0.5, 0.5, "Нет данных",
                                 ha="center", va="center", transform=self.result_ax.transAxes,
@@ -2031,9 +2270,10 @@ class DinamikaApp:
         else:
             channels_data = self.loader.result_channels
             
-        layer_names = list(channels_data.keys())
+        # Сортируем имена слоёв в правильном порядке
+        layer_names = _sort_layer_names(list(channels_data.keys()))
         
-        # Собираем данные по слоям в массив
+        # Собираем данные по слоям в массив (в отсортированном порядке)
         data_list = []
         for ch_name in layer_names:
             ch_data = channels_data[ch_name]
@@ -2048,7 +2288,8 @@ class DinamikaApp:
         # Поиск участков деформаций
         print(f"[DEBUG] Поиск участков с порогом σ={threshold_sigma}")
         zones = self.deformation_analyzer.find_zones(threshold_sigma=threshold_sigma)
-        self._deformation_zones = zones
+        # Сохраняем индексы автоматических зон (не сами кортежи)
+        self._deformation_zones = list(range(len(zones))) if zones else []
         print(f"[DEBUG] Найдено участков: {len(zones) if zones else 0}")
         
         if not zones:
@@ -2102,19 +2343,28 @@ class DinamikaApp:
         
         # Создаем вкладки для каждого участка
         print(f"[DEBUG] Создание {len(self._deformation_zones)} вкладок")
-        for i, zone_idx in enumerate(range(len(self._deformation_zones))):
+        for i, zone_data in enumerate(self._deformation_zones):
             frame = ttk.Frame(self.deformation_notebook)
             tab_name = f"Участок {i + 1}"
             self.deformation_notebook.add(frame, text=f"  {tab_name}  ")
             
             # Вычисляем результаты для участка
             try:
-                result = self.deformation_analyzer.zone_result(zone_idx, speed_kmh)
-                print(f"[DEBUG] Участок {i+1}: result keys={list(result.keys())}")
-                self._deformation_tabs[tab_name] = (zone_idx, result, frame)
+                # Проверяем, является ли это ручным участком (словарь) или автоматическим (индекс)
+                if isinstance(zone_data, dict):
+                    # Ручной участок - данные уже в zone_data
+                    result = zone_data
+                    print(f"[DEBUG] Участок {i+1}: ручной участок, keys={list(result.keys())}")
+                else:
+                    # Автоматический участок - получаем через zone_result
+                    zone_idx = zone_data
+                    result = self.deformation_analyzer.zone_result(zone_idx, speed_kmh)
+                    print(f"[DEBUG] Участок {i+1}: автоматический, result keys={list(result.keys())}")
+                
+                self._deformation_tabs[tab_name] = (i, result, frame)
                 
                 # Добавляем информацию об участке
-                self._populate_deformation_tab(frame, result, zone_idx, speed_kmh)
+                self._populate_deformation_tab(frame, result, i, speed_kmh)
             except Exception as e:
                 print(f"[ERROR] Ошибка при построении вкладки {tab_name}: {e}")
                 import traceback
@@ -2122,12 +2372,17 @@ class DinamikaApp:
                 lbl = ttk.Label(frame, text=f"Ошибка построения графика:\n{e}",
                                foreground="red")
                 lbl.pack(expand=True)
-                self._deformation_tabs[tab_name] = (zone_idx, None, frame)
+                self._deformation_tabs[tab_name] = (i, None, frame)
         
         # Выбираем первую вкладку
         if self._deformation_zones:
             try:
-                first_result = self.deformation_analyzer.zone_result(0, speed_kmh)
+                # Получаем первый элемент - может быть индексом или словарём
+                first_zone = self._deformation_zones[0]
+                if isinstance(first_zone, dict):
+                    first_result = first_zone
+                else:
+                    first_result = self.deformation_analyzer.zone_result(first_zone, speed_kmh)
                 self._current_deformation_zone = 0
             except Exception as e:
                 print(f"[ERROR] Ошибка при получении первого результата: {e}")
@@ -2143,6 +2398,12 @@ class DinamikaApp:
                                font=("Segoe UI", 10, "bold"),
                                foreground="#2563eb")
         info_label.pack(side=tk.LEFT, padx=4)
+        
+        # Кнопка добавления участка вручную
+        manual_zone_btn = ttk.Button(info_frame, text="✚ Добавить участок", 
+                                     style="Toolbar.TButton",
+                                     command=self._start_manual_zone_selection)
+        manual_zone_btn.pack(side=tk.RIGHT, padx=4)
         
         # График - занимает основное пространство
         chart_frame = ttk.Frame(parent)
@@ -2173,10 +2434,13 @@ class DinamikaApp:
         defs_centered = data - base
         
         # Построение графиков для каждого слоя (переворачиваем знак для правильной ориентации)
-        for i in range(self.deformation_analyzer.n_layers):
-            layer_name = layer_names[i]
-            color = CHANNEL_COLORS[i % len(CHANNEL_COLORS)]
-            ax.plot(x, -defs_centered[:, i], linewidth=1.2, color=color, label=layer_name, alpha=0.8)
+        # Сортируем слои по порядку
+        sorted_layer_names = _sort_layer_names(layer_names)
+        for layer_name in sorted_layer_names:
+            # Находим индекс слоя в исходном массиве
+            layer_idx = list(layer_names).index(layer_name)
+            color = _get_layer_color(layer_name, sorted_layer_names)
+            ax.plot(x, -defs_centered[:, layer_idx], linewidth=1.2, color=color, label=layer_name, alpha=0.8)
         
         ax.set_xlabel("Путь, м")
         ax.set_ylabel("Деформация, мм")
@@ -2195,6 +2459,10 @@ class DinamikaApp:
         
         canvas = FigureCanvasTkAgg(fig, master=chart_frame)
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # Сохраняем canvas и ax для использования при выборе участка вручную
+        self.full_deform_canvas = canvas
+        self.full_deform_ax = ax
         
         # Toolbar для графика
         toolbar = NavigationToolbar2Tk(canvas, chart_frame)
@@ -2409,7 +2677,7 @@ class DinamikaApp:
         peak_frame.pack(fill=tk.X, padx=4, pady=4)
         
         # Информация о временах пиков для расчёта скорости (только для самого нижнего слоя)
-        if result['first_two_peak_times'][0] is not None:
+        if result['first_two_peak_times'] and result['first_two_peak_times'][0] is not None:
             t1 = result['first_two_peak_times'][0]
             t2 = result['first_two_peak_times'][1]
             if t2 is not None:
@@ -2636,13 +2904,17 @@ class DinamikaApp:
                 if speed_label:
                     speed_label.config(text=speed_info)
 
-    def _build_trend_chart(self, zone_idx, x_range=None, method="polynomial"):
+    def _build_trend_chart(self, zone_idx, x_range=None, method="polynomial", poly_degree=3, 
+                          moving_avg_window=2, peak_sum_mode=False):
         """Построение статического графика тренда для участка деформации.
 
         Args:
             zone_idx: Индекс участка деформации
             x_range: Кортеж (x_start, x_end) для ограничения диапазона, или None для всего участка
             method: Метод сглаживания - "moving_average" или "polynomial"
+            poly_degree: Степень полинома (по умолчанию 3)
+            moving_avg_window: Размер окна для скользящего среднего (по умолчанию 2)
+            peak_sum_mode: Если True, пик = |Слой1| + |Слой6|, иначе старая формула
         """
         tab_name = f"Участок {zone_idx + 1}"
         if tab_name not in self._deformation_tabs:
@@ -2722,27 +2994,63 @@ class DinamikaApp:
         # Получаем деформацию первого слоя в точке пика шестого слоя
         layer1_at_peak = layer1_data[layer6_peak]
 
-        # Используем данные только из участка пика 6 слоя
-        # Создаём массив тренда: берём значения из участка пика
+        # Создаём два массива тренда:
+        # 1. trend_data - для левого графика (старая формула: |Слой6 + Слой1_at_peak|)
+        # 2. trend_data_calculated - для правого графика (расчетная: |Слой1| + |Слой6|)
         trend_data = np.zeros_like(x)
+        trend_data_calculated = np.zeros_like(x)
+
+        # Запоминаем исходные пики для замены после сглаживания
+        original_peak_value = 0.0
+        original_peak_calc_value = 0.0
 
         # Для каждой точки проверяем, входит ли она в участок пика 6 слоя
         for i in range(len(x)):
-            # Если точка в участке пика 6 слоя - увеличиваем значение шестого слоя на деформацию первого слоя в точке пика
+            # Если точка в участке пика 6 слоя
             if layer6_start <= i <= layer6_end:
-                trend_data[i] = layer6_data[i] + np.abs(layer1_at_peak)
+                # Левый график: |Слой6| + |Слой1| (модули складываются)
+                trend_data[i] = np.abs(layer6_data[i]) + np.abs(layer1_data[i])
+                
+                # Правый график: та же расчетная формула
+                trend_data_calculated[i] = np.abs(layer1_data[i]) + np.abs(layer6_data[i])
+        
+        # Запоминаем исходные пиковые значения
+        original_peak_value = np.max(trend_data)
+        original_peak_calc_value = np.max(trend_data_calculated)
 
-        # Применяем выбранный метод сглаживания
+        # Применяем полиномиальную аппроксимацию к расчетному тренду
+        # для построения графика с приведенным пиком (правый график)
+        trend_fit_calculated = np.zeros_like(trend_data_calculated)
+        mask_nonzero_calc = trend_data_calculated != 0
+        
+        if np.sum(mask_nonzero_calc) > poly_degree:
+            x_nonzero_calc = x[mask_nonzero_calc]
+            y_nonzero_calc = trend_data_calculated[mask_nonzero_calc]
+            
+            coeffs_calc = np.polyfit(x_nonzero_calc, y_nonzero_calc, poly_degree)
+            poly_func_calc = np.poly1d(coeffs_calc)
+            trend_fit_calculated[mask_nonzero_calc] = poly_func_calc(x_nonzero_calc)
+            
+            # Восстанавливаем исходное пиковое значение
+            peak_idx_calc = np.argmax(trend_fit_calculated)
+            trend_fit_calculated[peak_idx_calc] = original_peak_calc_value
+        else:
+            trend_fit_calculated = trend_data_calculated.copy()
+
+        # Применяем выбранный метод сглаживания ко второму графику
         if method == "moving_average":
-            # Скользящее среднее за 2 периода
-            window_size = 2
+            # Скользящее среднее за заданное окно
+            window_size = moving_avg_window
 
             if len(x) >= window_size:
                 trend_fit = np.zeros_like(trend_data)
                 trend_fit[0] = trend_data[0]
 
                 for i in range(1, len(trend_data)):
-                    trend_fit[i] = (trend_data[i] + trend_data[i-1]) / 2.0
+                    if i < window_size:
+                        trend_fit[i] = np.mean(trend_data[:i+1])
+                    else:
+                        trend_fit[i] = np.mean(trend_data[i-window_size+1:i+1])
             else:
                 trend_fit = trend_data
 
@@ -2751,12 +3059,11 @@ class DinamikaApp:
             # Полиномиальная аппроксимация
             # Используем только ненулевые значения для построения полинома
             mask_nonzero = trend_data != 0
-            if np.sum(mask_nonzero) > 3:  # Минимум 4 точки для полинома 3 степени
+            if np.sum(mask_nonzero) > poly_degree:  # Минимум (степень+1) точек для полинома
                 x_nonzero = x[mask_nonzero]
                 y_nonzero = trend_data[mask_nonzero]
 
-                # Полином 3 степени
-                poly_degree = 3
+                # Полином заданной степени
                 coeffs = np.polyfit(x_nonzero, y_nonzero, poly_degree)
                 poly_func = np.poly1d(coeffs)
 
@@ -2786,13 +3093,33 @@ class DinamikaApp:
         # Создаём новое окно для статического графика
         trend_window = tk.Toplevel(self.root)
         trend_window.title(f"Статический график тренда - Участок {zone_idx + 1}")
-        trend_window.geometry("900x650")
+        trend_window.geometry("1400x900")
+        
+        # Создаём главный фрейм с прокруткой
+        main_canvas = tk.Canvas(trend_window)
+        main_scrollbar = ttk.Scrollbar(trend_window, orient="vertical", command=main_canvas.yview)
+        scrollable_frame = ttk.Frame(main_canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: main_canvas.configure(scrollregion=main_canvas.bbox("all"))
+        )
+        
+        main_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        main_canvas.configure(yscrollcommand=main_scrollbar.set)
+        
+        main_canvas.pack(side="left", fill="both", expand=True)
+        main_scrollbar.pack(side="right", fill="y")
 
         # Панель выбора метода (сверху)
-        method_frame = ttk.Frame(trend_window)
+        method_frame = ttk.Frame(scrollable_frame)
         method_frame.pack(fill=tk.X, padx=8, pady=(8, 4))
 
-        ttk.Label(method_frame, text="Метод сглаживания:",
+        # Первая строка: метод сглаживания и галочка пикового режима
+        method_row1 = ttk.Frame(method_frame)
+        method_row1.pack(fill=tk.X, pady=2)
+
+        ttk.Label(method_row1, text="Метод сглаживания:",
                   font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=(4, 8))
 
         # Устанавливаем отображаемые названия
@@ -2805,111 +3132,173 @@ class DinamikaApp:
         method_display_reverse = {v: k for k, v in method_display.items()}
 
         method_var = tk.StringVar(value=method)
-        method_combo = ttk.Combobox(method_frame, textvariable=method_var,
+        method_combo = ttk.Combobox(method_row1, textvariable=method_var,
                                      values=list(method_display.values()),
                                      state="readonly", width=20)
         method_combo.pack(side=tk.LEFT, padx=4)
-
-        # Инициализируем отображение
         method_combo.set(method_display[method])
+
+        # Убрали галочку для режима пикового значения - теперь два графика строятся по-разному
+
+        # Вторая строка: параметры полинома
+        method_row2 = ttk.Frame(method_frame)
+        method_row2.pack(fill=tk.X, pady=2)
+
+        ttk.Label(method_row2, text="Степень полинома:",
+                  font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=(4, 8))
+
+        poly_degree_var = tk.IntVar(value=poly_degree)
+        poly_degree_spin = ttk.Spinbox(method_row2, from_=1, to=10, width=8,
+                                       textvariable=poly_degree_var)
+        poly_degree_spin.pack(side=tk.LEFT, padx=4)
+
+        ttk.Label(method_row2, text="Окно скользящей средней:",
+                  font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=(16, 8))
+
+        moving_avg_var = tk.IntVar(value=moving_avg_window)
+        moving_avg_spin = ttk.Spinbox(method_row2, from_=2, to=20, width=8,
+                                      textvariable=moving_avg_var)
+        moving_avg_spin.pack(side=tk.LEFT, padx=4)
 
         # Кнопка пересчета
         def on_recalculate():
-            # Получаем выбранное значение ДО закрытия окна
+            # Получаем выбранные значения ДО закрытия окна
             selected_display = method_combo.get()
             selected_method = method_display_reverse.get(selected_display, "polynomial")
+            new_poly_degree = poly_degree_var.get()
+            new_moving_avg_window = moving_avg_var.get()
 
             # Закрываем окно
             trend_window.destroy()
 
-            # Строим новый график с выбранным методом
-            self._build_trend_chart(zone_idx, x_range, selected_method)
+            # Строим новый график с выбранными параметрами
+            self._build_trend_chart(zone_idx, x_range, selected_method, 
+                                   new_poly_degree, new_moving_avg_window, peak_sum_mode)
 
-        recalc_btn = ttk.Button(method_frame, text="Пересчитать",
+        recalc_btn = ttk.Button(method_row2, text="Пересчитать",
                                 style="Toolbar.TButton",
                                 command=on_recalculate)
-        recalc_btn.pack(side=tk.LEFT, padx=8)
+        recalc_btn.pack(side=tk.LEFT, padx=16)
 
-        # Фрейм для графика
-        chart_frame = ttk.Frame(trend_window)
-        chart_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+        # Фрейм для графика (ограничиваем высоту до 70% окна)
+        chart_frame = ttk.Frame(scrollable_frame)
+        chart_frame.pack(fill=tk.X, padx=8, pady=4)
 
-        # Создание графика
-        fig = Figure(figsize=(9, 5), dpi=100)
-        ax = fig.add_subplot(111)
+        # Создание графика с двумя подграфиками (1 строка, 2 столбца)
+        # Высота графика = 70% от высоты окна (900 * 0.7 / 100 dpi)
+        fig = Figure(figsize=(14, 6.3), dpi=100)
+        
+        # Левый график - со сглаженным пиком
+        ax1 = fig.add_subplot(121)
+        
+        # Находим индекс пика в сглаженных данных
+        peak_idx_smooth = np.argmax(trend_fit)
+        peak_x_smooth = x[peak_idx_smooth]
+        peak_y_smooth = trend_fit[peak_idx_smooth]
 
-        # Находим индекс пика в сглаженных данных (максимум тренда)
-        peak_idx = np.argmax(trend_fit)
-        peak_x = x[peak_idx]
-        peak_y = trend_fit[peak_idx]
+        # Построение сглаженной линии тренда
+        ax1.plot(x, trend_fit, '-', color='#2563eb', linewidth=2.5,
+                label=f'{method_name} (пик: {peak_y_smooth:.3f} мм)')
 
-        # Построение только линии тренда (без точек)
-        ax.plot(x, trend_fit, '-', color='#2563eb', linewidth=2.5,
-                label=f'{method_name} (R²={r_squared:.4f})')
+        ax1.set_xlabel("Путь, м", fontsize=11)
+        ax1.set_ylabel("Тренд, мм", fontsize=11)
+        ax1.set_title("График со сглаженным пиком", fontsize=12, fontweight='bold')
+        ax1.legend(loc="best", fontsize=9)
+        ax1.grid(True, alpha=0.3)
+        ax1.invert_yaxis()
 
-        # Вертикальная линия через пик
-        # ax.axvline(x=peak_x, color='#dc2626', linestyle='--', linewidth=2,
-        #            label=f'Пик: x={peak_x:.3f} м, y={peak_y:.3f} мм')
-
-        # Вычисляем площади слева и справа от пика
-        # Левая часть: от начала до пика
-        left_mask = x <= peak_x
-        if np.sum(left_mask) > 1:
-            x_left = x[left_mask]
-            y_left = trend_fit[left_mask]
-            # Используем трапециевидное правило для вычисления площади
-            # В новых версиях NumPy используется trapezoid вместо trapz
+        # Вычисляем площади для левого графика
+        left_mask_smooth = x <= peak_x_smooth
+        if np.sum(left_mask_smooth) > 1:
+            x_left_smooth = x[left_mask_smooth]
+            y_left_smooth = trend_fit[left_mask_smooth]
             try:
-                area_left = np.trapezoid(y_left, x_left)
+                area_left_smooth = np.trapezoid(y_left_smooth, x_left_smooth)
             except AttributeError:
-                # Для старых версий NumPy
-                area_left = np.trapz(y_left, x_left)
+                area_left_smooth = np.trapz(y_left_smooth, x_left_smooth)
         else:
-            area_left = 0.0
+            area_left_smooth = 0.0
 
-        # Правая часть: от пика до конца
-        right_mask = x >= peak_x
-        if np.sum(right_mask) > 1:
-            x_right = x[right_mask]
-            y_right = trend_fit[right_mask]
+        right_mask_smooth = x >= peak_x_smooth
+        if np.sum(right_mask_smooth) > 1:
+            x_right_smooth = x[right_mask_smooth]
+            y_right_smooth = trend_fit[right_mask_smooth]
             try:
-                area_right = np.trapezoid(y_right, x_right)
+                area_right_smooth = np.trapezoid(y_right_smooth, x_right_smooth)
             except AttributeError:
-                area_right = np.trapz(y_right, x_right)
+                area_right_smooth = np.trapz(y_right_smooth, x_right_smooth)
         else:
-            area_right = 0.0
+            area_right_smooth = 0.0
 
-        # Закрашиваем области под кривой для наглядности
-        ax.fill_between(x[left_mask], 0, trend_fit[left_mask],
-                        alpha=0.2, color='#10b981', label=f'Площадь слева: {area_left:.4f}')
-        ax.fill_between(x[right_mask], 0, trend_fit[right_mask],
-                        alpha=0.2, color='#f59e0b', label=f'Площадь справа: {area_right:.4f}')
+        # Закрашиваем области на левом графике
+        ax1.fill_between(x[left_mask_smooth], 0, trend_fit[left_mask_smooth],
+                        alpha=0.2, color='#10b981', label=f'Площадь слева: {area_left_smooth:.4f}')
+        ax1.fill_between(x[right_mask_smooth], 0, trend_fit[right_mask_smooth],
+                        alpha=0.2, color='#f59e0b', label=f'Площадь справа: {area_right_smooth:.4f}')
+        
+        # Правый график - с расчетным приведенным пиком (|Слой1| + |Слой6|)
+        ax2 = fig.add_subplot(122)
+        
+        # Находим пик в расчетных данных
+        peak_idx_calc = np.argmax(trend_fit_calculated)
+        peak_x_calc = x[peak_idx_calc]
+        peak_y_calc = trend_fit_calculated[peak_idx_calc]
+        
+        # Строим полином расчетных данных
+        ax2.plot(x, trend_fit_calculated, '-', color='#dc2626', linewidth=2.5,
+                label=f'Полином {poly_degree} степени (пик: {peak_y_calc:.3f} мм)')
+        
+        ax2.set_xlabel("Путь, м", fontsize=11)
+        ax2.set_ylabel("Тренд, мм", fontsize=11)
+        ax2.set_title("График с расчетным приведенным пиком", fontsize=12, fontweight='bold')
+        ax2.legend(loc="best", fontsize=9)
+        ax2.grid(True, alpha=0.3)
+        ax2.invert_yaxis()
 
-        ax.set_xlabel("Путь, м", fontsize=11)
-        ax.set_ylabel("Тренд, мм", fontsize=11)
-        ax.set_title(f"Статический график тренда - Участок {zone_idx + 1}",
-                    fontsize=12, fontweight='bold')
-        ax.legend(loc="best", fontsize=9)
-        ax.grid(True, alpha=0.3)
+        # Вычисляем площади для правого графика
+        left_mask_calc = x <= peak_x_calc
+        if np.sum(left_mask_calc) > 1:
+            x_left_calc = x[left_mask_calc]
+            y_left_calc = trend_fit_calculated[left_mask_calc]
+            try:
+                area_left_calc = np.trapezoid(y_left_calc, x_left_calc)
+            except AttributeError:
+                area_left_calc = np.trapz(y_left_calc, x_left_calc)
+        else:
+            area_left_calc = 0.0
 
-        # Инвертируем ось Y, чтобы график смотрел вниз
-        ax.invert_yaxis()
+        right_mask_calc = x >= peak_x_calc
+        if np.sum(right_mask_calc) > 1:
+            x_right_calc = x[right_mask_calc]
+            y_right_calc = trend_fit_calculated[right_mask_calc]
+            try:
+                area_right_calc = np.trapezoid(y_right_calc, x_right_calc)
+            except AttributeError:
+                area_right_calc = np.trapz(y_right_calc, x_right_calc)
+        else:
+            area_right_calc = 0.0
+
+        # Закрашиваем области на правом графике
+        ax2.fill_between(x[left_mask_calc], 0, trend_fit_calculated[left_mask_calc],
+                        alpha=0.2, color='#10b981', label=f'Площадь слева: {area_left_calc:.4f}')
+        ax2.fill_between(x[right_mask_calc], 0, trend_fit_calculated[right_mask_calc],
+                        alpha=0.2, color='#f59e0b', label=f'Площадь справа: {area_right_calc:.4f}')
 
         fig.tight_layout()
 
-        # Добавляем canvas
+        # Добавляем canvas (не растягиваем)
         canvas = FigureCanvasTkAgg(fig, master=chart_frame)
-        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        canvas.get_tk_widget().pack(fill=tk.X, expand=False)
 
         # Toolbar для графика
-        toolbar_frame = ttk.Frame(trend_window)
+        toolbar_frame = ttk.Frame(scrollable_frame)
         toolbar_frame.pack(fill=tk.X, padx=8, pady=(0, 8))
 
         toolbar = NavigationToolbar2Tk(canvas, toolbar_frame)
         toolbar.update()
 
         # Панель с информацией о тренде
-        info_frame = ttk.LabelFrame(trend_window, text=" Информация о тренде ")
+        info_frame = ttk.LabelFrame(scrollable_frame, text=" Информация о тренде ")
         info_frame.pack(fill=tk.X, padx=8, pady=(0, 8))
 
         # Вычисляем статистику тренда
@@ -2923,19 +3312,27 @@ class DinamikaApp:
         if x_range is not None:
             range_info = f"\nВыбранный диапазон: {x_range[0]:.3f} — {x_range[1]:.3f} м\n"
 
-        # Общая площадь под кривой
-        total_area = area_left + area_right
+        # Общая площадь под кривой для сглаженного графика
+        total_area_smooth = area_left_smooth + area_right_smooth
+        
+        # Общая площадь для приведенного графика
+        total_area_calc = area_left_calc + area_right_calc
 
         info_text = (
             f"Метод: {method_name}\n"
             f"Коэффициент детерминации: R² = {r_squared:.6f}\n\n"
-            f"Пик тренда:\n"
-            f"  Координаты: x = {peak_x:.3f} м, y = {peak_y:.3f} мм\n\n"
-            f"Площади под кривой:\n"
-            f"  Слева от пика: {area_left:.6f} мм·м\n"
-            f"  Справа от пика: {area_right:.6f} мм·м\n"
-            f"  Общая площадь: {total_area:.6f} мм·м\n"
-            f"  Соотношение (Л/П): {area_left/area_right:.3f}\n\n" if area_right > 0 else f"  Общая площадь: {total_area:.6f} мм·м\n\n"
+            f"Сглаженный график:\n"
+            f"  Пик: x = {peak_x_smooth:.3f} м, y = {peak_y_smooth:.3f} мм\n"
+            f"  Площадь слева: {area_left_smooth:.6f} мм·м\n"
+            f"  Площадь справа: {area_right_smooth:.6f} мм·м\n"
+            f"  Общая площадь: {total_area_smooth:.6f} мм·м\n"
+            f"  Соотношение (Л/П): {area_left_smooth/area_right_smooth:.3f}\n\n" if area_right_smooth > 0 else f"  Общая площадь: {total_area_smooth:.6f} мм·м\n\n"
+            f"Приведенный график:\n"
+            f"  Пик: x = {peak_x_calc:.3f} м, y = {peak_y_calc:.3f} мм\n"
+            f"  Площадь слева: {area_left_calc:.6f} мм·м\n"
+            f"  Площадь справа: {area_right_calc:.6f} мм·м\n"
+            f"  Общая площадь: {total_area_calc:.6f} мм·м\n"
+            f"  Соотношение (Л/П): {area_left_calc/area_right_calc:.3f}\n\n" if area_right_calc > 0 else f"  Общая площадь: {total_area_calc:.6f} мм·м\n\n"
             f"Статистика сглаженного тренда:\n"
             f"  Минимум: {trend_min:.6f} мм\n"
             f"  Максимум: {trend_max:.6f} мм\n"
@@ -2951,7 +3348,7 @@ class DinamikaApp:
         info_label.pack(padx=8, pady=8)
 
         # Кнопка закрытия
-        close_btn = ttk.Button(trend_window, text="Закрыть",
+        close_btn = ttk.Button(scrollable_frame, text="Закрыть",
                               command=trend_window.destroy,
                               style="ToolbarClear.TButton")
         close_btn.pack(pady=(0, 8))
@@ -3101,12 +3498,14 @@ class DinamikaApp:
             return
 
         # Обновляем прямоугольник выделения с финальными координатами
+        # Удаляем прямоугольник выделения до построения графика
         if self._trend_selection_rect is not None:
-            self._trend_selection_rect.remove()
-
-        self._trend_selection_rect = ax.axvspan(
-            x_start, x_end, alpha=0.3, color='#10b981', zorder=0)
-        tab_data["canvas"].draw()
+            try:
+                self._trend_selection_rect.remove()
+                self._trend_selection_rect = None
+                tab_data["canvas"].draw()
+            except:
+                pass
 
         # Отключаем обработчики
         self._disconnect_trend_selection_handlers()
@@ -3114,18 +3513,6 @@ class DinamikaApp:
 
         # Строим график тренда для выбранного диапазона
         self._build_trend_chart(zone_idx, (x_start, x_end))
-
-        # Удаляем прямоугольник выделения через небольшую задержку
-        def clear_selection():
-            if self._trend_selection_rect is not None:
-                try:
-                    self._trend_selection_rect.remove()
-                    self._trend_selection_rect = None
-                    tab_data["canvas"].draw()
-                except:
-                    pass
-
-        self.root.after(500, clear_selection)
 
         self.status_var.set(f"Построен график тренда для диапазона {x_start:.3f} — {x_end:.3f} м")
 
@@ -3150,6 +3537,245 @@ class DinamikaApp:
             self._trend_release_id = None
 
         self._trend_selection_active = False
+
+    def _start_manual_zone_selection(self):
+        """Начало выбора участка вручную на графике деформаций."""
+        # Проверяем наличие анализатора и данных
+        if not hasattr(self, 'deformation_analyzer') or self.deformation_analyzer is None:
+            messagebox.showinfo("Информация", "Загрузите данные и выполните анализ деформаций")
+            return
+        
+        # Проверяем наличие графика "Весь график"
+        if not hasattr(self, 'full_deform_canvas') or self.full_deform_canvas is None:
+            messagebox.showinfo("Информация", "График анализа деформаций не построен")
+            return
+        
+        # Отключаем предыдущие обработчики, если они были
+        self._disconnect_manual_zone_handlers()
+
+        # Устанавливаем флаг активного выбора
+        self._manual_zone_selection_active = True
+        self._manual_zone_selection_start = None
+        self._manual_zone_selection_rect = None
+
+        # Подключаем обработчики событий для выбора участка
+        self._manual_zone_press_id = self.full_deform_canvas.mpl_connect(
+            'button_press_event', self._on_manual_zone_press)
+        self._manual_zone_release_id = self.full_deform_canvas.mpl_connect(
+            'button_release_event', self._on_manual_zone_release)
+
+        self.status_var.set("Выберите участок на графике деформаций (кликните и перетащите)")
+
+    def _on_manual_zone_press(self, event):
+        """Обработчик нажатия мыши для выбора участка."""
+        if not self._manual_zone_selection_active:
+            return
+
+        if event.inaxes != self.full_deform_ax:
+            return
+
+        self._manual_zone_selection_start = event.xdata
+
+        # Удаляем предыдущий прямоугольник выделения
+        if self._manual_zone_selection_rect is not None:
+            self._manual_zone_selection_rect.remove()
+            self._manual_zone_selection_rect = None
+            self.full_deform_canvas.draw()
+
+        # Подключаем обработчик движения мыши
+        self._manual_zone_motion_id = self.full_deform_canvas.mpl_connect(
+            'motion_notify_event', self._on_manual_zone_motion)
+
+    def _on_manual_zone_motion(self, event):
+        """Обработчик движения мыши - показывает выделение."""
+        if not self._manual_zone_selection_active or self._manual_zone_selection_start is None:
+            return
+
+        if event.inaxes != self.full_deform_ax or event.xdata is None:
+            return
+
+        # Удаляем предыдущий временный прямоугольник
+        if self._manual_zone_selection_rect is not None:
+            self._manual_zone_selection_rect.remove()
+
+        # Рисуем новый прямоугольник от начальной точки до текущей позиции курсора
+        x_start = self._manual_zone_selection_start
+        x_end = event.xdata
+
+        self._manual_zone_selection_rect = self.full_deform_ax.axvspan(
+            x_start, x_end, alpha=0.3, color='#8b5cf6', zorder=0)
+        self.full_deform_canvas.draw_idle()
+
+    def _on_manual_zone_release(self, event):
+        """Обработчик отпускания мыши - создаёт новый участок."""
+        if not self._manual_zone_selection_active:
+            return
+
+        # Отключаем обработчик движения мыши
+        if self._manual_zone_motion_id is not None:
+            self.full_deform_canvas.mpl_disconnect(self._manual_zone_motion_id)
+            self._manual_zone_motion_id = None
+
+        if event.inaxes != self.full_deform_ax or self._manual_zone_selection_start is None:
+            # Удаляем выделение если отпустили вне графика
+            if self._manual_zone_selection_rect is not None:
+                self._manual_zone_selection_rect.remove()
+                self._manual_zone_selection_rect = None
+                self.full_deform_canvas.draw()
+            return
+
+        x_start = self._manual_zone_selection_start
+        x_end = event.xdata
+
+        # Меняем местами, если выбрано справа налево
+        if x_start > x_end:
+            x_start, x_end = x_end, x_start
+
+        # Проверяем минимальную ширину диапазона
+        if abs(x_end - x_start) < 0.1:
+            self.status_var.set("Участок слишком мал, попробуйте снова")
+            # Удаляем выделение
+            if self._manual_zone_selection_rect is not None:
+                self._manual_zone_selection_rect.remove()
+                self._manual_zone_selection_rect = None
+                self.full_deform_canvas.draw()
+            return
+
+        # Удаляем прямоугольник выделения
+        if self._manual_zone_selection_rect is not None:
+            self._manual_zone_selection_rect.remove()
+            self._manual_zone_selection_rect = None
+            self.full_deform_canvas.draw()
+
+        # Отключаем обработчики
+        self._disconnect_manual_zone_handlers()
+        self._manual_zone_selection_active = False
+
+        # Добавляем новый участок
+        self._add_manual_zone(x_start, x_end)
+
+    def _add_manual_zone(self, x_start, x_end):
+        """Добавляет вручную выбранный участок в список."""
+        # Получаем текущую скорость
+        try:
+            speed_kmh = float(self.deform_speed_var.get())
+        except:
+            speed_kmh = SPEED_KMH_DEFAULT
+
+        # Вычисляем путь из времени
+        time_ms = self.deformation_analyzer.time
+        try:
+            speed_ms = speed_kmh / 3.6
+        except (ValueError, TypeError):
+            speed_ms = SPEED_KMH_DEFAULT / 3.6
+        
+        # Переводим время в расстояние (метры)
+        x = (time_ms - time_ms[0]) / 1000.0 * speed_ms
+
+        # Извлекаем деформации в выбранном диапазоне
+        mask = (x >= x_start) & (x <= x_end)
+        x_filtered = x[mask]
+        
+        # Получаем центрированные деформации
+        data = self.deformation_analyzer.data
+        if self.deformation_analyzer.global_baseline is None:
+            self.deformation_analyzer.prepare()
+        base = self.deformation_analyzer.global_baseline
+        defs_centered = data - base
+        defs = defs_centered[mask, :]
+
+        if len(x_filtered) == 0:
+            messagebox.showwarning("Внимание", "В выбранном диапазоне нет данных")
+            return
+
+        # Находим индексы начала и конца в исходных данных
+        start_idx = np.where(mask)[0][0]
+        end_idx = np.where(mask)[0][-1]
+        
+        # Получаем время для участка
+        time_filtered = time_ms[mask]
+        
+        # Находим пиковые значения
+        peak_vals = np.min(defs, axis=0)  # Минимум по каждому слою (пик деформации)
+        peak_indices = np.argmin(defs, axis=0)
+        
+        # Находим слой с наибольшей деформацией
+        largest_layer = np.argmin(peak_vals)
+        largest_value = peak_vals[largest_layer]
+        largest_idx = peak_indices[largest_layer]
+        largest_x = x_filtered[largest_idx]
+        largest_time = time_filtered[largest_idx]
+        
+        # Пиковая координата X (по самому большому пику)
+        peak_x = largest_x
+        peak_time = largest_time
+        
+        # Вертикальные значения в точке максимального пика
+        vert_values = defs[largest_idx, :]
+        
+        # Ра��ница между первым и последним слоем в точке пика
+        delta_y_at_largest = np.diff(vert_values)
+        
+        # Создаём результат для нового участка с полным набором полей
+        result = {
+            'zone_idx': len(self._deformation_zones),
+            'start_idx': start_idx,
+            'end_idx': end_idx,
+            't_start': time_filtered[0],
+            't_end': time_filtered[-1],
+            'duration_ms': time_filtered[-1] - time_filtered[0],
+            'x': x_filtered,
+            'time': time_filtered,
+            'defs': defs,
+            'x_start': x_start,
+            'x_end': x_end,
+            'base': base,  # Базовый уровень (одномерный массив)
+            'peak_x': peak_x,
+            'peak_time': peak_time,
+            'peak_vals': peak_vals,
+            'first_two_peak_times': [],  # Не вычисляем для ручных участков
+            'largest_layer': largest_layer,
+            'largest_x': largest_x,
+            'largest_time': largest_time,
+            'largest_value': largest_value,
+            'vert_values': vert_values,
+            'delta_y_at_largest': delta_y_at_largest,
+            'manual': True  # Флаг что участок добавлен вручную
+        }
+
+        # Добавляем участок в список зон
+        self._deformation_zones.append(result)
+        zone_idx = len(self._deformation_zones) - 1
+
+        # Создаём вкладку для нового участка
+        self._build_deformation_tabs(speed_kmh)
+
+        self.status_var.set(f"Добавлен участок {zone_idx + 1}: {x_start:.3f} — {x_end:.3f} м")
+
+    def _disconnect_manual_zone_handlers(self):
+        """Отключение обработчиков выбора участка вручную."""
+        if self._manual_zone_press_id is not None:
+            try:
+                self.full_deform_canvas.mpl_disconnect(self._manual_zone_press_id)
+            except:
+                pass
+            self._manual_zone_press_id = None
+
+        if self._manual_zone_release_id is not None:
+            try:
+                self.full_deform_canvas.mpl_disconnect(self._manual_zone_release_id)
+            except:
+                pass
+            self._manual_zone_release_id = None
+
+        if self._manual_zone_motion_id is not None:
+            try:
+                self.full_deform_canvas.mpl_disconnect(self._manual_zone_motion_id)
+            except:
+                pass
+            self._manual_zone_motion_id = None
+
+        self._manual_zone_selection_active = False
 
     # === Peak selection methods ===
 
@@ -3416,6 +4042,18 @@ class DinamikaApp:
         """Рисует тарировку: восходящий участок ярко, скат — бледно."""
         disp = np.asarray(disp, dtype=float)
         tug = np.asarray(tug, dtype=float)
+        
+        # Фильтруем NaN и Inf
+        valid_mask = np.isfinite(disp) & np.isfinite(tug)
+        if not np.any(valid_mask):
+            return  # Нет валидных данных
+        
+        disp = disp[valid_mask]
+        tug = tug[valid_mask]
+        
+        if len(disp) < 2:
+            return  # Недостаточно точек для графика
+        
         min_idx, peak_idx = self.calculator._find_rising_indices(tug)
 
         if min_idx > 0:
@@ -3435,18 +4073,21 @@ class DinamikaApp:
 
         if self.loader.per_layer_calib:
             visible_any = False
-            color_idx = 0
-            for ch_name, cal in self.loader.per_layer_calib.items():
+            # Сортируем слои по порядку
+            sorted_layers = _sort_layer_names(list(self.loader.per_layer_calib.keys()))
+            
+            for ch_name in sorted_layers:
+                cal = self.loader.per_layer_calib[ch_name]
                 visible = True
                 if hasattr(self, '_channel_vars') and ch_name in self._channel_vars:
                     visible = self._channel_vars[ch_name].get()
                 if visible:
+                    # Используем цвет слоя, а не датчика
+                    layer_color = _get_layer_color(ch_name, sorted_layers)
                     for tug_name, tug_vals in cal["tug"].items():
-                        color = CHANNEL_COLORS[color_idx % len(CHANNEL_COLORS)]
                         label = f"{ch_name} — {tug_name}"
                         self._plot_calib_rising_curve(
-                            self.disp_ax, cal["disp"], tug_vals, color, label)
-                        color_idx += 1
+                            self.disp_ax, cal["disp"], tug_vals, layer_color, label)
                     info = self.loader._per_layer_calib_info.get(ch_name)
                     if info:
                         r_left = info.get("range_left")
@@ -3521,7 +4162,9 @@ class DinamikaApp:
 
         if self.loader.per_layer_calib:
             visible_any = False
-            all_cals = list(self.loader.per_layer_calib.values())
+            # Сортируем слои по порядку
+            sorted_layers = _sort_layer_names(list(self.loader.per_layer_calib.keys()))
+            all_cals = [self.loader.per_layer_calib[name] for name in sorted_layers]
             
             # Проверяем наличие данных перед конкатенацией
             all_disp_parts = [c["disp"] for c in all_cals if "disp" in c and len(c.get("disp", [])) > 0]
@@ -3541,12 +4184,24 @@ class DinamikaApp:
             
             all_disp = np.concatenate(all_disp_parts)
             all_tugs = np.concatenate(all_tug_vals)
-            self.magnet_ax.set_xlim(all_disp.min(), all_disp.max())
-            y_margin = (all_tugs.max() - all_tugs.min()) * 0.05
-            self.magnet_ax.set_ylim(all_tugs.min() - y_margin, all_tugs.max() + y_margin)
+            
+            # Фильтруем NaN и Inf перед установкой лимитов
+            all_disp_valid = all_disp[np.isfinite(all_disp)]
+            all_tugs_valid = all_tugs[np.isfinite(all_tugs)]
+            
+            if len(all_disp_valid) == 0 or len(all_tugs_valid) == 0:
+                self.magnet_ax.text(0.5, 0.5, "Нет валидных данных (все NaN)",
+                                    ha="center", va="center", transform=self.magnet_ax.transAxes,
+                                    fontsize=13, color="#94a3b8", style="italic")
+                self.magnet_ax.set_axis_off()
+                return
+            
+            self.magnet_ax.set_xlim(all_disp_valid.min(), all_disp_valid.max())
+            y_margin = (all_tugs_valid.max() - all_tugs_valid.min()) * 0.05
+            self.magnet_ax.set_ylim(all_tugs_valid.min() - y_margin, all_tugs_valid.max() + y_margin)
 
-            color_idx = 0
-            for ch_name, cal in self.loader.per_layer_calib.items():
+            for ch_name in sorted_layers:
+                cal = self.loader.per_layer_calib[ch_name]
                 visible = True
                 if hasattr(self, '_channel_vars') and ch_name in self._channel_vars:
                     visible = self._channel_vars[ch_name].get()
@@ -3554,19 +4209,30 @@ class DinamikaApp:
                     continue
                 visible_any = True
 
+                # Используем цвет слоя
+                layer_color = _get_layer_color(ch_name, sorted_layers)
+                
                 layer_ix = self.loader._per_layer_intersections.get(ch_name, {})
                 selected = self.loader._per_layer_selected_sensor.get(ch_name)
                 magnet_x = self.loader._per_layer_magnet_x.get(ch_name)
 
                 for tug_name, tug_vals in cal["tug"].items():
-                    color = CHANNEL_COLORS[color_idx % len(CHANNEL_COLORS)]
+                    # Фильтруем NaN и Inf перед отрисовкой
+                    disp_data = cal["disp"]
+                    valid_mask = np.isfinite(disp_data) & np.isfinite(tug_vals)
+                    if not np.any(valid_mask):
+                        continue
+                    
+                    disp_clean = disp_data[valid_mask]
+                    tug_clean = tug_vals[valid_mask]
+                    
                     is_sel = (tug_name == selected)
                     lw = 2.2 if is_sel else 0.6
                     alpha = 1.0 if is_sel else 0.4
                     suffix = " *" if is_sel else ""
                     label = f"{ch_name} — {tug_name}{suffix}"
-                    self.magnet_ax.plot(cal["disp"], tug_vals,
-                                        linewidth=lw, color=color, alpha=alpha, label=label, rasterized=(not is_sel))
+                    self.magnet_ax.plot(disp_clean, tug_clean,
+                                        linewidth=lw, color=layer_color, alpha=alpha, label=label, rasterized=(not is_sel))
 
                     ix_info = layer_ix.get(tug_name, {})
                     mid_y = ix_info.get('mid_y')
@@ -3575,13 +4241,12 @@ class DinamikaApp:
                         mid_y = tug_vals[mid_idx]
                     x_pts = ix_info.get('x_points', np.array([]))
 
-                    self.magnet_ax.axhline(y=mid_y, color=color, linewidth=0.8,
+                    self.magnet_ax.axhline(y=mid_y, color=layer_color, linewidth=0.8,
                                            linestyle='--', alpha=0.5)
                     if len(x_pts) > 0:
                         self.magnet_ax.plot(x_pts, np.full_like(x_pts, mid_y), 'o',
-                                            color=color, markersize=5,
+                                            color=layer_color, markersize=5,
                                             markeredgecolor='black', markeredgewidth=0.6, zorder=5)
-                    color_idx += 1
 
                 if magnet_x is not None:
                     y_vals = [np.interp(magnet_x, cal["disp"], tv) for tv in cal["tug"].values()]

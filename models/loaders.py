@@ -6,6 +6,27 @@ import pandas as pd
 import openpyxl
 
 
+def _normalize_number(value):
+    """Нормализация числового значения из Excel (обработка ',' и '.')."""
+    if value is None:
+        return np.nan
+    
+    # Если уже число, возвращаем как есть
+    if isinstance(value, (int, float)):
+        return float(value)
+    
+    # Если строка, заменяем запятую на точку
+    if isinstance(value, str):
+        try:
+            # Убираем пробелы и заменяем запятую на точку
+            normalized = value.strip().replace(',', '.')
+            return float(normalized)
+        except (ValueError, AttributeError):
+            return np.nan
+    
+    return np.nan
+
+
 class ExcelLoader:
     """Загрузка данных из Excel файлов."""
     
@@ -75,10 +96,8 @@ class ExcelLoader:
                 time_vals = []
                 for row in data_rows:
                     if row and len(row) > 0 and row[0] is not None:
-                        try:
-                            time_vals.append(float(row[0]))
-                        except (ValueError, TypeError):
-                            time_vals.append(np.nan)
+                        val = _normalize_number(row[0])
+                        time_vals.append(val)
                 
                 time_array = np.array(time_vals)
                 time_mask = ~np.isnan(time_array)
@@ -95,11 +114,9 @@ class ExcelLoader:
                         
                         ch_vals = []
                         for row in data_rows:
-                            if row and len(row) > col_idx and row[col_idx] is not None:
-                                try:
-                                    ch_vals.append(float(row[col_idx]))
-                                except (ValueError, TypeError):
-                                    ch_vals.append(np.nan)
+                            if row and len(row) > col_idx:
+                                val = _normalize_number(row[col_idx])
+                                ch_vals.append(val)
                         
                         ch_array = np.array(ch_vals)
                         ch_mask = ~np.isnan(ch_array)
@@ -151,10 +168,10 @@ class ExcelLoader:
                         layer_sensor_data[layer_name][sensor_name] = []
                     
                     if disp_val is not None and reading_val is not None:
-                        try:
-                            layer_sensor_data[layer_name][sensor_name].append((float(disp_val), float(reading_val)))
-                        except (ValueError, TypeError):
-                            pass
+                        disp_norm = _normalize_number(disp_val)
+                        reading_norm = _normalize_number(reading_val)
+                        if not np.isnan(disp_norm) and not np.isnan(reading_norm):
+                            layer_sensor_data[layer_name][sensor_name].append((disp_norm, reading_norm))
                 
                 # Преобразуем в нужный формат
                 for layer_name, sensors in layer_sensor_data.items():
@@ -200,12 +217,8 @@ class ExcelLoader:
                     t_val = row[0] if len(row) > 0 else None
                     d_val = row[1] if len(row) > 1 else None
                     
-                    try:
-                        res_time.append(float(t_val) if t_val is not None else np.nan)
-                        res_disp.append(float(d_val) if d_val is not None else np.nan)
-                    except (ValueError, TypeError):
-                        res_time.append(np.nan)
-                        res_disp.append(np.nan)
+                    res_time.append(_normalize_number(t_val))
+                    res_disp.append(_normalize_number(d_val))
                 
                 res_time_arr = np.array(res_time)
                 res_disp_arr = np.array(res_disp)
@@ -233,11 +246,9 @@ class ExcelLoader:
                         
                         ch_vals = []
                         for row in data_rows:
-                            if row and len(row) > col_idx and row[col_idx] is not None:
-                                try:
-                                    ch_vals.append(float(row[col_idx]))
-                                except (ValueError, TypeError):
-                                    ch_vals.append(np.nan)
+                            if row and len(row) > col_idx:
+                                val = _normalize_number(row[col_idx])
+                                ch_vals.append(val)
                         
                         ch_array = np.array(ch_vals)
                         ch_mask = ~np.isnan(ch_array)
