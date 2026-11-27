@@ -2951,9 +2951,7 @@ class DinamikaApp:
                 messagebox.showwarning("Внимание", "В выбранном диапазоне нет данных")
                 return
 
-        # Вычисляем функцию тренда: |Слой 1| + Слой 6
-        # Находим участок с наибольшим пиком только для 6 слоя
-        # Из 1 слоя берём значения в тех же точках, что и пик 6 слоя
+        # Вычисляем функцию тренда: |Слой 1| + |Слой 6|
         # Индексы: Слой 1 = индекс 0, Слой 6 = индекс 5
         layer1_data = defs[:, 0]  # первый слой
         layer6_data = defs[:, 5]  # шестой слой
@@ -2983,38 +2981,29 @@ class DinamikaApp:
 
             return start_idx, end_idx, peak_idx
 
-        # Находим участок пика только для 6 слоя
+        # Находим участок пика для 6 слоя (для отображения информации и левого графика)
         layer6_start, layer6_end, layer6_peak = find_peak_region(layer6_data)
 
-        # Для 1 слоя используем те же самые индексы (синхронно с 6 слоем)
-        layer1_start = layer6_start
-        layer1_end = layer6_end
-        layer1_peak = layer6_peak  # Та же точка, что и пик 6 слоя
-
-        # Получаем деформацию первого слоя в точке пика шестого слоя
-        layer1_at_peak = layer1_data[layer6_peak]
+        # Участок пика для 1 слоя находится независимо (для справочной информации)
+        layer1_start, layer1_end, layer1_peak = find_peak_region(layer1_data)
 
         # Создаём два массива тренда:
-        # 1. trend_data - для левого графика (старая формула: |Слой6 + Слой1_at_peak|)
+        # 1. trend_data - для левого графика (участок пика определяется по 6 слою)
         # 2. trend_data_calculated - для правого графика (расчетная: |Слой1| + |Слой6|)
         trend_data = np.zeros_like(x)
         trend_data_calculated = np.zeros_like(x)
 
-        # Запоминаем исходные пики для замены после сглаживания
-        original_peak_value = 0.0
-        original_peak_calc_value = 0.0
-
-        # Для каждой точки проверяем, входит ли она в участок пика 6 слоя
+        # Для каждой точки проверяем, входит ли она в участок пика соответствующего слоя
         for i in range(len(x)):
-            # Если точка в участке пика 6 слоя
+            # Левый график: суммирование в точках участка пика 6 слоя
             if layer6_start <= i <= layer6_end:
-                # Левый график: |Слой6| + |Слой1| (модули складываются)
                 trend_data[i] = np.abs(layer6_data[i]) + np.abs(layer1_data[i])
-                
-                # Правый график: та же расчетная формула
-                trend_data_calculated[i] = np.abs(layer1_data[i]) + np.abs(layer6_data[i])
-        
-        # Запоминаем исходные пиковые значения
+
+            # Правый график (с расчетным приведенным пиком):
+            # суммируем ВСЕ соответствующие точки из 1 и 6 слоёв, а не только точки пика
+            trend_data_calculated[i] = np.abs(layer1_data[i]) + np.abs(layer6_data[i])
+
+        # Запоминаем исходные пиковые значения для замены после сглаживания
         original_peak_value = np.max(trend_data)
         original_peak_calc_value = np.max(trend_data_calculated)
 
@@ -3339,7 +3328,10 @@ class DinamikaApp:
             f"  Среднее: {trend_mean:.6f} мм\n"
             f"  Ст. откл.: {trend_std:.6f} мм\n\n"
             f"Участок пика (Слой 6):\n"
-            f"  Точки: {layer6_start}-{layer6_end} (пик в {layer6_peak})\n\n"
+            f"  Точки: {layer6_start}-{layer6_end} (пик в {layer6_peak})\n"
+            f"Участок пика (Слой 1):\n"
+            f"  Точки: {layer1_start}-{layer1_end} (пик в {layer1_peak})\n\n"
+            f"Приведенный график: суммированы все точки |Слой1| + |Слой6|\n\n"
             f"Исходный участок: {result['x_start']:.3f} — {result['x_end']:.3f} м"
         )
 
